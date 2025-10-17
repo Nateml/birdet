@@ -12,7 +12,10 @@
 
     const path = $derived(page.url.pathname);
     const onHome = $derived(path === '/');
-    const onAbout = $derived(path === '/about');
+    const onTrain = $derived(path === '/train');
+    const onLibrary = $derived(path === '/library');
+    const onStats = $derived(path === '/stats');
+    const onSettings = $derived(path === '/settings');
 </script>
 
 <svelte:head>
@@ -29,7 +32,10 @@
             <div class="navbar-center hidden md:flex">
                 <ul class="menu menu-horizontal px-1 gap-2">
                     <li><a href="/" class:active={onHome}>Home</a></li>
-                    <li><a href="/about" class:active={onAbout}>About</a></li>
+                    <li><a href="/train" class:active={onTrain}>Train</a></li>
+                    <li><a href="/library" class:active={onLibrary}>Library</a></li>
+                    <li><a href="/stats" class:active={onStats}>Stats</a></li>
+                    <li><a href="/settings" class:active={onSettings}>Settings</a></li>
                 </ul>
             </div>
 
