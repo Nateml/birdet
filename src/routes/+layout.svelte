@@ -22,7 +22,7 @@
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
-<div class="min-h-dvh">
+<div class="flex flex-col min-h-dvh">
     <header class="border-b">
         <div class="navbar container mx-auto">
             <div class="navbar-start">
@@ -48,12 +48,6 @@
     <main class="container mx-auto py-6 px-4">
         {@render children()}
     </main>
-
-    <footer class="border-t">
-        <div class="container mx-auto py-4 px-4 text-center text-sm opacity-70">
-            &copy; {new Date().getFullYear()} Birdet. All rights reserved.
-        </div>
-    </footer>
 </div>
 
 
