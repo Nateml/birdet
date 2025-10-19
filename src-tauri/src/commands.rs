@@ -3,6 +3,8 @@ use serde::{Serialize, Deserialize};
 use tauri::State;
 use anyhow::Result;
 
+use crate::models::Pack;
+
 #[derive(Serialize)]
 pub struct Question {
     pub bird_id: i64,
@@ -37,6 +39,13 @@ pub struct AnswerResult {
 #[tauri::command]
 pub async fn submit_answer(state: State<'_, AppState>, payload: AnswerPayload) -> Result<AnswerResult, String> {
     crate::services::quiz::submit_answer(&state.db, payload)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_packs(state: State<'_, AppState>) -> Result<Vec<Pack>, String> {
+    crate::services::packs::get_packs(&state.db)
         .await
         .map_err(|e| e.to_string())
 }

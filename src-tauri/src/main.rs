@@ -7,50 +7,49 @@ mod commands;
 mod errors;
 mod services;
 
-// Import db wrapper
 use db::{init_db, Db};
 use tauri::Manager;
+use dotenv::dotenv;
 
 // App state to be shared across Tauri commands
 // Keeps a reference to the database connection pool
 #[derive(Clone)]
-struct AppState {
-    db: Db,
+pub struct AppState {
+    pub db: Db,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    // Load environment variables from .env file!()
+    dotenv().ok();
     // Initialize the database
-    let app = tauri::Builder::default()
-        .setup(|app| {
-            tauri::async_runtime::spawn(async move {
-                // no-op
-            });
-            Ok(())
-        });
-
-    let handle = app.build(tauri::generate_context!())?;
-
-    // Resolve app data path
-    let app_dir = handle
-        .path().app_data_dir().expect("app dir").to_string_lossy().to_string();
-
-    std::fs::create_dir_all(&app_dir).ok();
-    let db_path = format!("{}/birdet.sqlite", app_dir);
-
-    let db = init_db(&db_path).await?;
-    let state = AppState { db };
-
-    handle.manage(state.clone());
-
     tauri::Builder::default()
-        .manage(state)
+        .setup(|app| {
+            // clone a handle to move to async task
+            let handle = app.handle();
+
+            let db = tauri::async_runtime::block_on(async {
+                match init_db(&handle).await {
+                    Ok(db) => {
+                        println!("Database initialized successfully.");
+                        db
+                    }
+                    Err(e) => {
+                        panic!("Failed to initialize database: {}", e);
+                    }
+                }
+            });
+
+            app.manage(AppState { db });
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_next_question,
-            commands::submit_answer
+            commands::submit_answer,
+            commands::get_packs,
             // Add commands here
         ])
-        .run(tauri::generate_context!());
+        .run(tauri::generate_context!())?;
 
     Ok(())
 }

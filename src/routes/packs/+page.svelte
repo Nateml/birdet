@@ -23,6 +23,24 @@
             birds: 24,
         },
     ];
+
+    import { onMount } from 'svelte';
+    import { getPacks } from '$lib/api/packs';
+    import type { PackDto } from '$lib/api/packs';
+
+    let error: string | null = null;
+    let packs: PackDto[] = [];
+
+    async function loadPacks() {
+        error = null;
+        try {
+            packs = await getPacks();
+        } catch (e) {
+            error = (e as Error)?.message ?? 'Failed to load packs.';
+        }
+    }
+
+    onMount(loadPacks);
 </script>
 
 <h1 class="text-2xl font-bold mb-4">Bird Packs</h1>
@@ -42,12 +60,12 @@
     <a href="/packs/create" class="btn btn-sm btn-neutral mt-2 lg:mt-0">Create New Pack</a>
 </div>
 
-<ul class="grid gap-2">{#each custom as p}
+<ul class="grid gap-2">{#each packs as p}
     <li>
         <a href={`/packs/${p.id}`} class="card bg-info text-info-content border p-6">
             <h3 class="text-lg font-bold">{p.name}</h3>
             <p class="text-sm">{p.description}</p>
-            <p class="text-xs">{p.birds} birds</p>
+            <p class="text-xs">{p.bird_count} birds</p>
         </a>
     </li>
 {/each}</ul>
