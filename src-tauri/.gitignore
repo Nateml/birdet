@@ -2,3 +2,7 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+
+# Machine-specific: sqlx compile-time DB + its connection string
+/.env
+/dev.db

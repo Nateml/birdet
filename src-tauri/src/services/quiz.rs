@@ -6,8 +6,12 @@ use sqlx::Row;
 pub async fn next_question(db: &Db, pack: Option<String>) -> Result<Question> {
     // pick a random bird from the pack
     let row = sqlx::query(
-        r#"SELECT id, common_name FROM birds
-           WHERE (?1 IS NULL OR pack = ?1)
+        r#"SELECT b.id, b.common_name FROM birds b
+           WHERE (?1 IS NULL OR EXISTS (
+               SELECT 1 FROM pack_recordings pr
+               JOIN recordings r ON pr.recording_id = r.id
+               WHERE r.bird_id = b.id AND pr.pack_id = ?1
+           ))
            ORDER BY RANDOM() LIMIT 1"#
     )
     .bind(pack)
@@ -48,15 +52,25 @@ pub async fn submit_answer(db: &Db, payload: AnswerPayload) -> Result<AnswerResu
 
     let correct = payload.guess == correct_name;
 
-    // Upsert stats
+    // Upsert aggregate mastery
     sqlx::query(r#"
-      INSERT INTO stats (bird_id, seen, correct)
+      INSERT INTO mastery (bird_id, seen, correct)
       VALUES (?1, 1, CASE WHEN ?2 THEN 1 ELSE 0 END)
       ON CONFLICT(bird_id) DO UPDATE SET
         seen = seen + 1,
         correct = correct + CASE WHEN excluded.correct=1 THEN 1 ELSE 0 END
     "#)
     .bind(payload.bird_id)
+    .bind(correct)
+    .execute(&db.0).await?;
+
+    // Log the individual attempt
+    sqlx::query(r#"
+      INSERT INTO history (bird_id, recording_id, answered_correctly)
+      VALUES (?1, ?2, ?3)
+    "#)
+    .bind(payload.bird_id)
+    .bind(payload.recording_id)
     .bind(correct)
     .execute(&db.0).await?;
 

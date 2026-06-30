@@ -47,6 +47,8 @@ fn main() -> anyhow::Result<()> {
             commands::get_next_question,
             commands::submit_answer,
             commands::get_packs,
+            commands::get_recording_path,
+            commands::get_stats,
             // Add commands here
         ])
         .run(tauri::generate_context!())?;

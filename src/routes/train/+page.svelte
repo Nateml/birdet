@@ -1,14 +1,14 @@
 <!-- src/routes/train/+page.svelte -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { startSession, type Mode } from '$lib/stores/session';
 	let pack = $state('');
 	let length = $state(10);
-	let mode: 'multiple' | 'type' = $state('multiple');
+	let mode: Mode = $state('multiple');
 
 	function start() {
-		// create a session id and stash config in a store/DB
 		const id = crypto.randomUUID();
-		// …init session data here…
+		startSession(id, { pack, length, mode });
 		goto(`/train/${id}`); // goes to lobby
 	}
 </script>
@@ -33,6 +33,6 @@
 		</select>
 	</label>
 
-	<button class="btn btn-primary" on:click={start} disabled={!pack}>Start</button>
+	<button class="btn btn-primary" onclick={start} disabled={!pack}>Start</button>
 </div>
 
