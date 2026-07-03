@@ -2,9 +2,17 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { startSession, type Mode } from '$lib/stores/session';
+	import { getPacks, type PackDto } from '$lib/api/packs';
 	let pack = $state('');
 	let length = $state(10);
 	let mode: Mode = $state('multiple');
+
+	let packs = $state<PackDto[]>([]);
+	$effect(() => {
+		getPacks()
+			.then((p) => (packs = p))
+			.catch(() => (packs = []));
+	});
 
 	function start() {
 		const id = crypto.randomUUID();
@@ -17,7 +25,9 @@
 <div class="grid gap-4 max-w-md">
 	<select class="select select-bordered" bind:value={pack} aria-label="Pack">
 		<option disabled value=''>Choose a pack</option>
-		<option value="eu-garden">EU Garden Birds</option>
+		{#each packs as p (p.id)}
+			<option value={p.id}>{p.name}</option>
+		{/each}
 	</select>
 
 	<label class="form-control">
