@@ -6,22 +6,10 @@
 
 	const id = page.params.sessionID;
 
-	// Session lives in memory; a reload or direct nav loses it -> back to setup.
+	// The lobby was removed from the flow (home starts a session directly). If a
+	// session exists, jump into it; otherwise back to the pack picker.
 	onMount(() => {
-		if (!$session || $session.id !== id) goto('/train');
+		if ($session && $session.id === id) goto(`/train/${id}/question/0`, { replaceState: true });
+		else goto('/', { replaceState: true });
 	});
-
-	function begin() {
-		goto(`/train/${id}/question/0`);
-	}
 </script>
-
-{#if $session && $session.id === id}
-	<h1 class="text-2xl font-bold mb-4">Ready to train</h1>
-	<ul class="mb-6 grid gap-1 opacity-80">
-		<li>Pack: {$session.config.pack || 'All birds'}</li>
-		<li>Questions: {$session.config.length}</li>
-		<li>Mode: {$session.config.mode}</li>
-	</ul>
-	<button class="btn btn-primary" onclick={begin}>Begin</button>
-{/if}

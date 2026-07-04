@@ -3,3 +3,105 @@
     themes: light, dark, forest, lemonade --default, night --prefersdark;
 }
 
+/* ── BirdEar design fonts (bundled locally; CSP blocks Google CDN) ── */
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/Fraunces-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/Fraunces-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/Fraunces-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-400-italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/PlusJakartaSans-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/PlusJakartaSans-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/PlusJakartaSans-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/PlusJakartaSans-700.woff2') format('woff2');
+}
+
+/* ── BirdEar design tokens (namespaced `be-` to avoid clashing with DaisyUI) ──
+   Source: Figma export theme.css. Utilities: bg-be-bg, text-be-fg,
+   text-be-muted, border-be-border, bg-be-primary, font-be-serif, … */
+@theme {
+  --color-be-bg: #07100a;
+  --color-be-fg: #cde8c8;
+  --color-be-card: #0e1a0f;
+  --color-be-card-fg: #cde8c8;
+  --color-be-primary: #52e876;
+  --color-be-primary-fg: #021005;
+  --color-be-secondary: #162614;
+  --color-be-secondary-fg: #85b87e;
+  --color-be-muted: #111e10;
+  --color-be-muted-fg: #5f8b5a;
+  --color-be-accent: #f0b429;
+  --color-be-accent-fg: #1a0e00;
+  --color-be-destructive: #e05252;
+  --color-be-destructive-fg: #ffffff;
+  --color-be-border: rgba(82, 232, 118, 0.09);
+  --color-be-input: rgba(82, 232, 118, 0.06);
+  --color-be-ring: rgba(82, 232, 118, 0.38);
+
+  --font-be-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-be-serif: 'Fraunces', ui-serif, Georgia, serif;
+  --font-be-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+html, body {
+    zoom: 1.3
+}

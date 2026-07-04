@@ -6,7 +6,7 @@ use sqlx::Row;
 pub async fn next_question(db: &Db, pack: Option<String>) -> Result<Question> {
     // pick a random bird from the pack
     let row = sqlx::query(
-        r#"SELECT b.id, b.common_name FROM birds b
+        r#"SELECT b.id AS id, b.common_name AS common_name FROM birds b
            WHERE (?1 IS NULL OR EXISTS (
                SELECT 1 FROM pack_recordings pr
                JOIN recordings r ON pr.recording_id = r.id
@@ -20,7 +20,7 @@ pub async fn next_question(db: &Db, pack: Option<String>) -> Result<Question> {
     // pick a random recording for that bird
     let bird_id: i64 = row.get("id");
     let recording_row = sqlx::query(
-        r#"SELECT id FROM recordings
+        r#"SELECT id AS id FROM recordings
               WHERE bird_id = ?1
                 ORDER BY RANDOM() LIMIT 1"#
     )
