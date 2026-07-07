@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
+	import { page } from '$app/state';
 	import { getPacks, getBirds, getBirdPacks, importPack, type PackDto, type BirdListItem } from '$lib/api/packs';
 	import { runImportJob, importJob } from '$lib/stores/importJob';
 	import PackEditor from '$lib/components/PackEditor.svelte';
@@ -10,6 +11,23 @@
 
 	type Sel = { kind: 'pack'; id: string } | { kind: 'bird'; id: number } | null;
 	let sel = $state<Sel>(null);
+
+	let masterEl = $state<HTMLElement | null>(null);
+
+	// Deep-link selection via ?bird=<id> / ?pack=<id> (used by the command
+	// palette and direct links). Runs whenever those params change.
+	$effect(() => {
+		const b = page.url.searchParams.get('bird');
+		const p = page.url.searchParams.get('pack');
+		if (b) {
+			tab = 'birds';
+			query = '';
+			sel = { kind: 'bird', id: Number(b) };
+		} else if (p) {
+			tab = 'packs';
+			sel = { kind: 'pack', id: p };
+		}
+	});
 
 	let packs = $state<PackDto[]>([]);
 	let birds = $state<BirdListItem[]>([]);
@@ -52,6 +70,36 @@
 		if (tab === t) return;
 		tab = t;
 		sel = null;
+	}
+
+	// ↑/↓ move the selection through the active master list.
+	async function moveSel(dir: 1 | -1) {
+		const packMode = tab === 'packs';
+		const list: Array<{ id: string | number }> = packMode ? packs : filteredBirds;
+		if (list.length === 0) return;
+		let idx = -1;
+		if (sel) {
+			idx = list.findIndex((x) =>
+				packMode ? sel!.kind === 'pack' && sel!.id === x.id : sel!.kind === 'bird' && sel!.id === x.id
+			);
+		}
+		const next = idx < 0 ? (dir > 0 ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, idx + dir));
+		const item = list[next];
+		sel = packMode ? { kind: 'pack', id: item.id as string } : { kind: 'bird', id: item.id as number };
+		await tick();
+		masterEl?.querySelector('[data-active]')?.scrollIntoView({ block: 'nearest' });
+	}
+
+	function onMasterKey(e: KeyboardEvent) {
+		const t = e.target as HTMLElement;
+		if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			void moveSel(1);
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			void moveSel(-1);
+		}
 	}
 
 	async function onPackFile(e: Event) {
@@ -168,22 +216,24 @@
 	{:else}
 		<div class="flex min-h-0 flex-1">
 			<!-- Master list -->
-			<div class="flex w-80 shrink-0 flex-col border-r border-be-border">
+			<div class="flex w-80 shrink-0 flex-col border-r border-be-border" onkeydown={onMasterKey} role="listbox" tabindex="-1" aria-label="Library items">
 				{#if tab === 'birds'}
 					<div class="border-b border-be-border p-3">
 						<input bind:value={query} placeholder="search birds…"
 							class="w-full rounded-lg border border-be-border bg-be-bg px-3 py-1.5 text-sm text-be-fg outline-none focus:border-be-primary/40" />
 					</div>
 				{/if}
-				<div class="flex-1 overflow-y-auto p-2">
+				<div bind:this={masterEl} class="flex-1 overflow-y-auto p-2">
 					{#if tab === 'packs'}
 						{#if packs.length === 0}
 							<p class="px-3 py-4 text-sm text-be-muted-fg">No packs yet.</p>
 						{:else}
 							{#each packs as p, i (p.id)}
+								{@const active = sel?.kind === 'pack' && sel.id === p.id}
 								<button
 									onclick={() => (sel = { kind: 'pack', id: p.id })}
-									class="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors {sel?.kind === 'pack' && sel.id === p.id
+									data-active={active ? '' : undefined}
+									class="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors {active
 										? 'bg-be-secondary'
 										: 'hover:bg-be-secondary/50'}"
 								>
@@ -201,9 +251,11 @@
 						<p class="px-3 py-4 text-sm text-be-muted-fg">No birds match “{query}”.</p>
 					{:else}
 						{#each filteredBirds as b (b.id)}
+							{@const active = sel?.kind === 'bird' && sel.id === b.id}
 							<button
 								onclick={() => (sel = { kind: 'bird', id: b.id })}
-								class="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors {sel?.kind === 'bird' && sel.id === b.id
+								data-active={active ? '' : undefined}
+								class="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors {active
 									? 'bg-be-secondary'
 									: 'hover:bg-be-secondary/50'}"
 							>
