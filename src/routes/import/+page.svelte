@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import type { UnlistenFn } from '@tauri-apps/api/event';
-	import AppHeader from '$lib/components/AppHeader.svelte';
 	import RegionPicker from '$lib/components/RegionPicker.svelte';
 	import {
 		importBirds,
@@ -170,7 +169,6 @@
 	const pctDone = $derived(progress.total ? (progress.current / progress.total) * 100 : 0);
 </script>
 
-<AppHeader />
 
 <main class="mx-auto max-w-2xl px-8 py-10">
 	<div class="mb-6">

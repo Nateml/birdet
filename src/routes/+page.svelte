@@ -61,33 +61,12 @@
 	});
 </script>
 
-<header class="sticky top-0 z-40 flex items-center justify-between border-b border-be-border bg-be-bg px-8 pt-8 pb-5">
-	<div class="flex items-center gap-3">
-		<div
-			class="flex h-9 w-9 items-center justify-center rounded-lg border border-be-primary/20 bg-be-primary/10 text-lg"
-		>
-			🐦
-		</div>
-		<div>
-			<h1 class="font-be-serif text-xl font-bold leading-none">Birdet</h1>
-			<p class="font-be-mono mt-0.5 text-xs text-be-muted-fg">birdsong identification trainer</p>
-		</div>
-	</div>
-	<nav class="flex items-center gap-4 text-sm text-be-muted-fg">
-		<a href="/stats" class="transition-colors hover:text-be-fg">Stats</a>
-		<a href="/library" class="hidden transition-colors hover:text-be-fg sm:inline">Library</a>
-		<a href="/guide" class="hidden transition-colors hover:text-be-fg sm:inline">Guide</a>
-		<button
-			onclick={() => goto('/settings')}
-			class="flex items-center gap-1.5 rounded-lg border border-be-border px-3 py-1.5 transition-colors hover:border-be-primary/40 hover:text-be-fg"
-		>
-			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-			Settings
-		</button>
-	</nav>
-</header>
-
 <main class="mx-auto max-w-3xl px-8 py-10">
+	<div class="mb-8">
+		<h2 class="font-be-serif text-3xl font-bold leading-tight">Train</h2>
+		<p class="text-sm text-be-muted-fg">Your review schedule and pack picker.</p>
+	</div>
+
 
 	{#if error}
 		<div

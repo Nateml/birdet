@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getStats, type Stats, type BirdStat } from '$lib/api/stats';
-	import AppHeader from '$lib/components/AppHeader.svelte';
 
 	let stats = $state<Stats | null>(null);
 	let error = $state<string | null>(null);
@@ -61,7 +60,6 @@
 	const isDue = (b: BirdStat) => b.state !== 'new' && relDue(b.due_at) === 'due now';
 </script>
 
-<AppHeader />
 
 <main class="mx-auto max-w-3xl px-8 py-10">
 	<div class="mb-8">

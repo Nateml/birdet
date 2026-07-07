@@ -6,6 +6,7 @@
     import { page } from '$app/state';
     import ThemeSwitcher from '$lib/components/ThemeSwitcher.svelte';
     import ImportIndicator from '$lib/components/ImportIndicator.svelte';
+    import Sidebar from '$lib/components/Sidebar.svelte';
 	
 	let { children } = $props();
 
@@ -44,16 +45,14 @@
     const onStats = $derived(path === '/stats');
     const onSettings = $derived(path === '/settings');
 
-    // BirdEar design screens render full-bleed (own header, no app navbar):
-    // the home pack-picker, the in-session training screens, and the
-    // BirdEar-styled secondary screens (Stats / Library / Settings).
-    const beScreens = ['/stats', '/library', '/settings', '/import', '/guide'];
-    const inSession = $derived(
-        path === '/' ||
-        (path.startsWith('/train/') && path !== '/train') ||
-        path.startsWith('/packs/') ||
-        path.startsWith('/birds/') ||
-        beScreens.includes(path)
+    // Three chrome modes:
+    //   training  — in-session screens render chromeless (own focused header)
+    //   app shell — sidebar + scrollable content pane (the BirdEar screens)
+    //   fallback  — legacy DaisyUI pages (train index, dashboard, species)
+    const isTraining = $derived(path.startsWith('/train/') && path !== '/train');
+    const appScreens = ['/', '/library', '/stats', '/settings', '/import', '/guide'];
+    const isApp = $derived(
+        appScreens.includes(path) || path.startsWith('/packs/') || path.startsWith('/birds/')
     );
 </script>
 
@@ -63,9 +62,17 @@
 
 <ImportIndicator />
 
-{#if inSession}
+{#if isTraining}
     <div class="min-h-dvh bg-be-bg text-be-fg font-be-sans">
         {@render children()}
+    </div>
+{:else if isApp}
+    <!-- Desktop app shell: fixed sidebar, only the content pane scrolls. -->
+    <div class="flex h-dvh overflow-hidden bg-be-bg text-be-fg font-be-sans">
+        <Sidebar />
+        <div class="min-w-0 flex-1 overflow-y-auto">
+            {@render children()}
+        </div>
     </div>
 {:else}
     <div class="flex flex-col min-h-dvh">

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { setup } from '$lib/stores/setup';
-	import AppHeader from '$lib/components/AppHeader.svelte';
 	import { getSetting, setSetting, SETTING_EBIRD_KEY, SETTING_XC_KEY } from '$lib/api/settings';
 	import { backfillRecordingMeta } from '$lib/api/recordings';
 
@@ -46,7 +45,6 @@
 	}
 </script>
 
-<AppHeader />
 
 <main class="mx-auto max-w-2xl px-8 py-10">
 	<div class="mb-8">

@@ -6,7 +6,6 @@
 	import { startSession } from '$lib/stores/session';
 	import { setup } from '$lib/stores/setup';
 	import { runImportJob, importJob } from '$lib/stores/importJob';
-	import AppHeader from '$lib/components/AppHeader.svelte';
 
 	type Tab = 'packs' | 'birds';
 	let tab = $state<Tab>('packs');
@@ -89,7 +88,6 @@
 	);
 </script>
 
-<AppHeader />
 
 <main class="mx-auto max-w-3xl px-8 py-10">
 	<div class="mb-6 flex items-end justify-between gap-4">

@@ -3,7 +3,6 @@
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
 	import { page } from '$app/state';
-	import AppHeader from '$lib/components/AppHeader.svelte';
 	import { startSession } from '$lib/stores/session';
 	import { setup } from '$lib/stores/setup';
 	import {
@@ -156,7 +155,6 @@
 	}
 </script>
 
-<AppHeader />
 
 <main class="mx-auto max-w-2xl px-8 py-10">
 	<a href="/library" class="mb-4 inline-flex items-center gap-1 text-sm text-be-muted-fg transition-colors hover:text-be-fg">

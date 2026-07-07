@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import AppHeader from '$lib/components/AppHeader.svelte';
 	import { getBirds, type BirdListItem } from '$lib/api/packs';
 	import { getRecordingBlobUrl } from '$lib/api/audio';
 	import {
@@ -131,7 +130,6 @@
 	}
 </script>
 
-<AppHeader />
 
 <audio bind:this={audioEl} onended={() => (playingId = null)} class="hidden"></audio>
 

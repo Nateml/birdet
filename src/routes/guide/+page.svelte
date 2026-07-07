@@ -1,8 +1,6 @@
 <script lang="ts">
-	import AppHeader from '$lib/components/AppHeader.svelte';
 </script>
 
-<AppHeader />
 
 <main class="mx-auto max-w-3xl px-8 py-10">
 	<div class="mb-8">
