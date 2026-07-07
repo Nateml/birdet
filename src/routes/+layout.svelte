@@ -5,6 +5,7 @@
     import { onMount } from 'svelte';
     import { page } from '$app/state';
     import ThemeSwitcher from '$lib/components/ThemeSwitcher.svelte';
+    import ImportIndicator from '$lib/components/ImportIndicator.svelte';
 	
 	let { children } = $props();
 
@@ -59,6 +60,8 @@
 <svelte:head>
 	<link rel="icon" href={favicon} />
 </svelte:head>
+
+<ImportIndicator />
 
 {#if inSession}
     <div class="min-h-dvh bg-be-bg text-be-fg font-be-sans">

@@ -5,7 +5,7 @@
 	import { getPacks, getBirds, getBirdPacks, importPack, type PackDto, type BirdListItem } from '$lib/api/packs';
 	import { startSession } from '$lib/stores/session';
 	import { setup } from '$lib/stores/setup';
-	import { onImportProgress } from '$lib/api/import';
+	import { runImportJob, importJob } from '$lib/stores/importJob';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 
 	type Tab = 'packs' | 'birds';
@@ -29,18 +29,16 @@
 		const input = e.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
 		input.value = ''; // allow re-selecting the same file later
-		if (!file) return;
+		if (!file || importing || $importJob.active) return;
 
 		importing = true;
 		error = null;
 		importStatus = 'Reading file…';
-		let unlisten: (() => void) | null = null;
 		try {
 			const text = await file.text();
-			unlisten = await onImportProgress((p) => {
-				if (p.stage === 'species' || p.stage === 'downloading') importStatus = p.message;
-			});
-			const r = await importPack(text);
+			// Live progress is shown by the global indicator; runImportJob also
+			// blocks a second concurrent import.
+			const r = await runImportJob('pack', () => importPack(text));
 			const parts = [`Linked ${r.linked_existing}`];
 			if (r.downloaded_new) parts.push(`downloaded ${r.downloaded_new}`);
 			if (r.skipped) parts.push(`skipped ${r.skipped}`);
@@ -50,7 +48,6 @@
 			error = (err as string) ?? 'Pack import failed.';
 			importStatus = null;
 		} finally {
-			unlisten?.();
 			importing = false;
 		}
 	}
@@ -104,7 +101,7 @@
 			<input bind:this={fileInput} type="file" accept=".json,application/json" class="hidden" onchange={onPackFile} />
 			<button
 				onclick={() => fileInput?.click()}
-				disabled={importing}
+				disabled={importing || $importJob.active}
 				title="Import a pack from a .birdet-pack.json file"
 				class="rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
 			>

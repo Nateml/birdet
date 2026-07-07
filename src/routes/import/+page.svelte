@@ -14,6 +14,7 @@
 	} from '$lib/api/import';
 	import { getSetting, SETTING_EBIRD_KEY, SETTING_XC_KEY } from '$lib/api/settings';
 	import { getPacks, type PackDto } from '$lib/api/packs';
+	import { runImportJob, importJob } from '$lib/stores/importJob';
 
 	type Mode = 'region' | 'search';
 	let mode = $state<Mode>('region');
@@ -116,18 +117,20 @@
 	}
 
 	async function runRegion() {
-		if (!region.trim() || running) return;
+		if (!region.trim() || running || $importJob.active) return;
 		resetRun();
 		try {
-			summary = await importBirds({
-				region: region.trim(),
-				max_species: Math.max(1, Math.round(maxSpecies) || 20),
-				max_per_species: Math.max(1, Math.round(maxPerSpecies) || 1),
-				quality: quality || null,
-				rec_type: recType || null,
-				family: family.trim() || null,
-				create_pack: createPack
-			});
+			summary = await runImportJob(region.trim(), () =>
+				importBirds({
+					region: region.trim(),
+					max_species: Math.max(1, Math.round(maxSpecies) || 20),
+					max_per_species: Math.max(1, Math.round(maxPerSpecies) || 1),
+					quality: quality || null,
+					rec_type: recType || null,
+					family: family.trim() || null,
+					create_pack: createPack
+				})
+			);
 		} catch (e) {
 			error = (e as string) ?? 'Import failed.';
 		} finally {
@@ -136,17 +139,19 @@
 	}
 
 	async function runSearch() {
-		if (selected.length === 0 || running) return;
+		if (selected.length === 0 || running || $importJob.active) return;
 		resetRun();
 		try {
-			summary = await importSpecies({
-				ebirdCodes: selected.map((s) => s.ebird_code),
-				quality: quality || null,
-				recType: recType || null,
-				maxPerSpecies: Math.max(1, Math.round(maxPerSpecies) || 1),
-				packIds: [...packTargets],
-				newPackName: newPackName.trim() || null
-			});
+			summary = await runImportJob('birds', () =>
+				importSpecies({
+					ebirdCodes: selected.map((s) => s.ebird_code),
+					quality: quality || null,
+					recType: recType || null,
+					maxPerSpecies: Math.max(1, Math.round(maxPerSpecies) || 1),
+					packIds: [...packTargets],
+					newPackName: newPackName.trim() || null
+				})
+			);
 			selected = [];
 			newPackName = '';
 			packTargets = new Set();
@@ -252,7 +257,7 @@
 
 			<button
 				onclick={runRegion}
-				disabled={running || !region.trim() || !hasKeys}
+				disabled={running || $importJob.active || !region.trim() || !hasKeys}
 				class="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-be-primary px-5 py-2.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50"
 			>
 				{running ? 'Importing…' : 'Import'}
@@ -359,7 +364,7 @@
 
 			<button
 				onclick={runSearch}
-				disabled={running || selected.length === 0 || !hasKeys}
+				disabled={running || $importJob.active || selected.length === 0 || !hasKeys}
 				class="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-be-primary px-5 py-2.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50"
 			>
 				{running ? 'Adding…' : selected.length ? `Add ${selected.length} ${selected.length === 1 ? 'bird' : 'birds'}` : 'Add birds'}
