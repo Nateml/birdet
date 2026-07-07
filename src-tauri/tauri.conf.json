@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "birdet",
+        "title": "Birdet",
         "width": 1600,
         "height": 1000,
+        "minWidth": 900,
+        "minHeight": 600,
         "center": true,
         "resizable": true,
         "fullscreen": false,
@@ -35,6 +37,11 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "publisher": "nateml",
+    "copyright": "© 2026 nateml",
+    "category": "Education",
+    "shortDescription": "Learn bird calls by ear.",
+    "longDescription": "Birdet trains you to recognise birds by ear using spaced repetition, with recordings from Xeno-Canto and region data from eBird.",
     "resources": [
         "resources/**/*"
     ],
@@ -44,6 +51,11 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }
