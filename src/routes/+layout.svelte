@@ -18,8 +18,16 @@
     const onSettings = $derived(path === '/settings');
 
     // BirdEar design screens render full-bleed (own header, no app navbar):
-    // the home pack-picker and the in-session training screens (question/result).
-    const inSession = $derived(path === '/' || (path.startsWith('/train/') && path !== '/train'));
+    // the home pack-picker, the in-session training screens, and the
+    // BirdEar-styled secondary screens (Stats / Library / Settings).
+    const beScreens = ['/stats', '/library', '/settings', '/import'];
+    const inSession = $derived(
+        path === '/' ||
+        (path.startsWith('/train/') && path !== '/train') ||
+        path.startsWith('/packs/') ||
+        path.startsWith('/birds/') ||
+        beScreens.includes(path)
+    );
 </script>
 
 <svelte:head>
