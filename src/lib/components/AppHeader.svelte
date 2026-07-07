@@ -8,6 +8,7 @@
 	const links = [
 		{ href: '/stats', label: 'Stats' },
 		{ href: '/library', label: 'Library' },
+		{ href: '/guide', label: 'Guide' },
 		{ href: '/settings', label: 'Settings' }
 	];
 </script>

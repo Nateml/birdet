@@ -76,6 +76,7 @@
 	<nav class="flex items-center gap-4 text-sm text-be-muted-fg">
 		<a href="/stats" class="transition-colors hover:text-be-fg">Stats</a>
 		<a href="/library" class="hidden transition-colors hover:text-be-fg sm:inline">Library</a>
+		<a href="/guide" class="hidden transition-colors hover:text-be-fg sm:inline">Guide</a>
 		<button
 			onclick={() => goto('/settings')}
 			class="flex items-center gap-1.5 rounded-lg border border-be-border px-3 py-1.5 transition-colors hover:border-be-primary/40 hover:text-be-fg"

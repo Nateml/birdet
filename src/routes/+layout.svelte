@@ -20,7 +20,7 @@
     // BirdEar design screens render full-bleed (own header, no app navbar):
     // the home pack-picker, the in-session training screens, and the
     // BirdEar-styled secondary screens (Stats / Library / Settings).
-    const beScreens = ['/stats', '/library', '/settings', '/import'];
+    const beScreens = ['/stats', '/library', '/settings', '/import', '/guide'];
     const inSession = $derived(
         path === '/' ||
         (path.startsWith('/train/') && path !== '/train') ||
