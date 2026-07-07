@@ -7,6 +7,7 @@
     import ThemeSwitcher from '$lib/components/ThemeSwitcher.svelte';
     import ImportIndicator from '$lib/components/ImportIndicator.svelte';
     import Sidebar from '$lib/components/Sidebar.svelte';
+    import CommandPalette from '$lib/components/CommandPalette.svelte';
 	
 	let { children } = $props();
 
@@ -61,6 +62,7 @@
 </svelte:head>
 
 <ImportIndicator />
+<CommandPalette />
 
 {#if isTraining}
     <div class="min-h-dvh bg-be-bg text-be-fg font-be-sans">

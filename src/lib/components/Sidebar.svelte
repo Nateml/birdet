@@ -51,6 +51,18 @@
 		</div>
 	</a>
 
+	<!-- search / command palette -->
+	<div class="px-3 pb-1 pt-1">
+		<button
+			onclick={() => window.dispatchEvent(new Event('open-command-palette'))}
+			class="flex w-full items-center gap-2.5 rounded-lg border border-be-border px-3 py-2 text-sm text-be-muted-fg transition-colors hover:bg-be-secondary/50 hover:text-be-fg"
+		>
+			<svg class="h-[15px] w-[15px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+			<span class="flex-1 text-left">Search</span>
+			<kbd class="font-be-mono rounded bg-be-secondary px-1.5 py-0.5 text-[10px]">⌘K</kbd>
+		</button>
+	</div>
+
 	<!-- nav -->
 	<nav class="flex flex-1 flex-col gap-1 px-3 py-2">
 		{#each items as it (it.href)}
