@@ -222,7 +222,16 @@
 			<div class="min-w-0 flex-1 overflow-y-auto">
 				{#if sel?.kind === 'pack'}
 					{#key sel.id}
-						<PackEditor packId={sel.id} onChanged={onDetailChanged} onDeleted={onPackDeleted} />
+						<PackEditor
+							packId={sel.id}
+							onChanged={onDetailChanged}
+							onDeleted={onPackDeleted}
+							onSelectBird={(id) => {
+								tab = 'birds';
+								query = '';
+								sel = { kind: 'bird', id };
+							}}
+						/>
 					{/key}
 				{:else if sel?.kind === 'bird'}
 					{#key sel.id}

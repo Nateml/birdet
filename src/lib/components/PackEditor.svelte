@@ -19,13 +19,20 @@
 		packId,
 		standalone = false,
 		onChanged,
-		onDeleted
+		onDeleted,
+		onSelectBird
 	}: {
 		packId: string;
 		standalone?: boolean;
 		onChanged?: () => void;
 		onDeleted?: () => void;
+		onSelectBird?: (birdId: number) => void;
 	} = $props();
+
+	function selectBird(birdId: number) {
+		if (onSelectBird) onSelectBird(birdId);
+		else goto(`/birds/${birdId}`);
+	}
 
 	let name = $state('');
 	let originalName = $state('');
@@ -249,10 +256,11 @@
 			<div class="divide-y divide-be-border overflow-hidden rounded-xl border border-be-border bg-be-card">
 				{#each packBirds as b (b.id)}
 					<div class="flex items-center gap-4 px-5 py-3">
-						<div class="min-w-0 flex-1">
-							<h3 class="truncate font-medium leading-snug">{b.common_name}</h3>
+						<button onclick={() => selectBird(b.id)} title="View recordings"
+							class="group min-w-0 flex-1 text-left">
+							<h3 class="truncate font-medium leading-snug transition-colors group-hover:text-be-primary">{b.common_name}</h3>
 							<p class="truncate text-xs italic text-be-muted-fg">{b.scientific_name}{#if b.family} · {b.family}{/if}</p>
-						</div>
+						</button>
 						<span class="font-be-mono shrink-0 text-xs text-be-muted-fg">{b.recording_count}♪</span>
 						<button onclick={() => remove(b.id)} disabled={busy} title="Remove from pack"
 							class="shrink-0 rounded-md p-1.5 text-be-muted-fg transition-colors hover:bg-be-destructive/10 hover:text-be-destructive">
