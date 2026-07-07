@@ -36,7 +36,7 @@
 				Birdet trains you to recognise birds <em>by ear</em>. You hear a recording, see its
 				spectrogram, and pick the right species from four choices. Based on your answers, the app
                 schedules each bird so you review it right before you'd forget it (ideally). This way,
-                birds you find difficult are shown to you more often, while birds that distinctive don't 
+                birds you find difficult are shown to you more often, while birds that are distinctive don't
                 clutter your learning experience as often (*cough*Hadedas*cough*).
 			</p>
 			<p class="text-sm leading-relaxed text-be-muted-fg">
