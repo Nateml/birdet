@@ -15,8 +15,13 @@
 
     // Dev-only zoom: WSLg renders the webview small, so bump it while developing.
     // `import.meta.env.DEV` is false in production builds, so this never ships.
+    // The zoom makes the h-dvh shell overflow the viewport, so also re-enable
+    // root scrolling in dev (production keeps the root locked, no scrollbar).
     onMount(() => {
-        if (import.meta.env.DEV) document.documentElement.style.zoom = '1.3';
+        if (import.meta.env.DEV) {
+            document.documentElement.style.zoom = '1.3';
+            document.body.style.overflow = 'auto';
+        }
     });
 
     // F11 toggles OS fullscreen (hides the window title bar); Esc leaves it.
@@ -71,7 +76,7 @@
 <CommandPalette />
 
 {#if isTraining}
-    <div class="min-h-dvh bg-be-bg text-be-fg font-be-sans">
+    <div class="h-dvh overflow-y-auto bg-be-bg text-be-fg font-be-sans">
         {@render children()}
     </div>
 {:else if isApp}
@@ -83,7 +88,7 @@
         </div>
     </div>
 {:else}
-    <div class="flex flex-col min-h-dvh">
+    <div class="flex h-dvh flex-col overflow-hidden">
         <header class="border-b">
             <div class="navbar container mx-auto">
                 <div class="navbar-start">
@@ -106,8 +111,10 @@
             </div>
         </header>
 
-        <main class="container mx-auto py-6 px-4">
-            {@render children()}
+        <main class="flex-1 overflow-y-auto">
+            <div class="container mx-auto py-6 px-4">
+                {@render children()}
+            </div>
         </main>
     </div>
 {/if}

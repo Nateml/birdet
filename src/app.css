@@ -103,6 +103,8 @@
 }
 
 html, body {
+    height: 100%;
+    margin: 0;
     /* Paint the root the app background so overscroll / rubber-banding past the
        page doesn't flash white. */
     background: var(--color-be-bg);
@@ -113,7 +115,9 @@ html {
 }
 
 body {
-    /* Stop the scroll from bouncing past the content edges. */
+    /* The root never scrolls — each screen owns its own scroll region. WebView2
+       (Windows) otherwise shows a scrollbar for any sub-pixel overflow. */
+    overflow: hidden;
     overscroll-behavior: none;
 }
 
