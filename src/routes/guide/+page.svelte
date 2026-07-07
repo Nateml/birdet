@@ -8,7 +8,7 @@
 	<div class="mb-8">
 		<h2 class="font-be-serif mb-2 text-3xl font-bold leading-tight">How Birdet works</h2>
 		<p class="text-sm text-be-muted-fg">
-			A quick guide to training, the review schedule, and getting around the app.
+            A guide to Birdet: training, the review schedule, and using the app in general.
 		</p>
 	</div>
 
@@ -16,14 +16,15 @@
 	<nav class="mb-10 rounded-xl border border-be-border bg-be-card p-5">
 		<p class="font-be-mono mb-3 text-xs uppercase tracking-widest text-be-muted-fg">Contents</p>
 		<ul class="grid grid-cols-1 gap-1.5 text-sm sm:grid-cols-2">
-			<li><a href="#overview" class="text-be-primary hover:underline">1 · The idea</a></li>
+			<li><a href="#overview" class="text-be-primary hover:underline">1 · The concept</a></li>
 			<li><a href="#setup" class="text-be-primary hover:underline">2 · First-time setup</a></li>
 			<li><a href="#session" class="text-be-primary hover:underline">3 · A training session</a></li>
 			<li><a href="#question" class="text-be-primary hover:underline">4 · Answering a question</a></li>
 			<li><a href="#schedule" class="text-be-primary hover:underline">5 · How the schedule works</a></li>
 			<li><a href="#modes" class="text-be-primary hover:underline">6 · Session modes</a></li>
 			<li><a href="#navigation" class="text-be-primary hover:underline">7 · Getting around</a></li>
-			<li><a href="#shortcuts" class="text-be-primary hover:underline">8 · Keyboard shortcuts</a></li>
+			<li><a href="#collection" class="text-be-primary hover:underline">8 · Managing your collection</a></li>
+			<li><a href="#shortcuts" class="text-be-primary hover:underline">9 · Keyboard shortcuts</a></li>
 		</ul>
 	</nav>
 
@@ -33,13 +34,14 @@
 			<h3 class="font-be-serif mb-3 text-xl font-bold">1 · The idea</h3>
 			<p class="mb-3 text-sm leading-relaxed text-be-fg">
 				Birdet trains you to recognise birds <em>by ear</em>. You hear a recording, see its
-				spectrogram, and pick the right species from four choices. Over many short sessions the app
-				schedules each bird so you review it right before you'd forget it — birds you find hard come
-				back often, birds you know drift further apart.
+				spectrogram, and pick the right species from four choices. Based on your answers, the app
+                schedules each bird so you review it right before you'd forget it (ideally). This way,
+                birds you find difficult are shown to you more often, while birds that distinctive don't 
+                clutter your learning experience as often (*cough*Hadedas*cough*).
 			</p>
 			<p class="text-sm leading-relaxed text-be-muted-fg">
-				That scheduling is <strong class="text-be-fg">spaced repetition</strong> (the same engine
-				behind flashcard apps like Anki), tuned for birdsong.
+				This type of scheduling is called <strong class="text-be-fg">spaced repetition</strong> 
+                and is conceptually the same as what apps like Anki do.
 			</p>
 		</section>
 
@@ -47,8 +49,8 @@
 		<section id="setup">
 			<h3 class="font-be-serif mb-3 text-xl font-bold">2 · First-time setup</h3>
 			<p class="mb-4 text-sm leading-relaxed text-be-fg">
-				Birdet ships with a few demo birds, but the real value comes from building your own
-				collection of local species.
+				Birdet starts with a few demo birds, but you're expected to curate your own
+				collection of local species. The steps to do this are given below.
 			</p>
 			<ol class="space-y-3 text-sm leading-relaxed">
 				<li class="flex gap-3">
@@ -56,24 +58,22 @@
 					<span>
 						<strong>Add API keys.</strong> In <a href="/settings" class="text-be-primary hover:underline">Settings</a>,
 						paste a free eBird token and a free Xeno-Canto key. eBird tells Birdet which species
-						live in a region; Xeno-Canto provides the recordings.
+						live in a region; Xeno-Canto provides the recordings. To get an eBird API key, visit
+                        the <a href="https://ebird.org/api/keygen" target="_blank" rel="noopener noreferrer">ebird.org/api/keygen</a> (and create an account if you don't have one). To obtain the Xeno-Canto key, you will need to <a href="https://xeno-canto.org/" target="_blank" rel="noopener noreferrer">create a Xeno-Canto account</a> and verify your email address (the key will then be available under your Xeno-Canto profile details).
 					</span>
 				</li>
 				<li class="flex gap-3">
 					<span class="font-be-mono shrink-0 text-be-muted-fg">2.</span>
 					<span>
 						<strong>Import birds.</strong> From <a href="/library" class="text-be-primary hover:underline">Library → Import</a>,
-						pick a region (e.g. your state or county). Birdet ranks that region's species by how
-						commonly they're actually reported, then downloads recordings for the most common ones —
-						so you learn the birds you'll really hear first. You can also search for and add
-						individual species by name.
+						pick a country and (optionally) a subregion. Birdet ranks that region's species by how commonly they're actually reported, then downloads recordings for the most common ones. You can also search for and add individual species by name. Each bird is imported with one or more (you can specify this) audio recordings from Xeno-Canto. <em>Note: this import process can take a while due to rate-limiting by the eBird/Xeno-Canto APIs, plus the time it takes to download the audio files.</em>
 					</span>
 				</li>
 				<li class="flex gap-3">
 					<span class="font-be-mono shrink-0 text-be-muted-fg">3.</span>
 					<span>
 						<strong>Start training.</strong> Head to the home screen and hit
-						<em>Start session</em>. That's it.
+						<em>Start session</em>.
 					</span>
 				</li>
 			</ol>
@@ -83,7 +83,7 @@
 		<section id="session">
 			<h3 class="font-be-serif mb-3 text-xl font-bold">3 · A training session</h3>
 			<p class="mb-3 text-sm leading-relaxed text-be-fg">
-				The home screen's <strong>Learn &amp; Review</strong> panel is your daily driver. The two
+				The home screen's <strong>Learn &amp; Review</strong> panel is your friend. The two
 				numbers on it tell you what's waiting:
 			</p>
 			<div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -108,13 +108,12 @@
 		<section id="question">
 			<h3 class="font-be-serif mb-3 text-xl font-bold">4 · Answering a question</h3>
 			<p class="mb-4 text-sm leading-relaxed text-be-fg">
-				Each question plays one recording and shows its spectrogram (a picture of the sound over
-				time). Listen, then choose:
+				Each question plays one recording (picked randomly from the recordings locally available for that bird) and shows its spectrogram. Once you're ready, choose:
 			</p>
 			<ul class="mb-5 space-y-2.5 text-sm leading-relaxed">
 				<li class="flex gap-2.5"><span class="text-be-primary">▸</span> <span><strong>Play / replay</strong> the call as many times as you like before answering.</span></li>
 				<li class="flex gap-2.5"><span class="text-be-primary">▸</span> <span>Pick one of the <strong>four species</strong> options. You'll see immediately whether you were right, with the correct name.</span></li>
-				<li class="flex gap-2.5"><span class="text-be-primary">▸</span> <span>Not sure? <strong>Skip</strong> (“I don't know”) reveals the answer without guessing — it counts as a miss so the bird comes back sooner.</span></li>
+				<li class="flex gap-2.5"><span class="text-be-primary">▸</span> <span>Not sure? <strong>Skip</strong> (“I don't know”) reveals the answer without guessing — it counts as a miss so the bird comes back sooner. It's better to pick this instead of guessing when you're completely unsure.</span></li>
 				<li class="flex gap-2.5"><span class="text-be-primary">▸</span> <span>Turn on <strong>auto-play</strong> in Settings to hear each call the moment it loads.</span></li>
 			</ul>
 
@@ -229,9 +228,59 @@
 			</div>
 		</section>
 
-		<!-- 8 · Shortcuts -->
+		<!-- 8 · Managing your collection -->
+		<section id="collection">
+			<h3 class="font-be-serif mb-3 text-xl font-bold">8 · Managing your collection</h3>
+			<p class="mb-5 text-sm leading-relaxed text-be-fg">
+				Everything you've imported lives in the <a href="/library" class="text-be-primary hover:underline">Library</a>,
+				split into <strong>Packs</strong> and <strong>Birds</strong>. Here's how to manage it.
+			</p>
+
+			<!-- Birds -->
+			<h4 class="font-be-serif mb-2 text-base font-semibold">Your birds</h4>
+			<p class="mb-3 text-sm leading-relaxed text-be-muted-fg">
+				The <strong>Birds</strong> tab lists every species you've collected. Search by common or
+				scientific name, and each row shows a <span class="font-be-mono rounded-full bg-be-secondary/50 px-2 py-0.5 text-[11px] text-be-muted-fg">pack</span>
+				tag for every pack it belongs to (click a tag to jump to that pack). The ♪ count is how many
+				recordings that bird has. Click a bird to open its detail page.
+			</p>
+
+			<!-- Recordings -->
+			<h4 class="font-be-serif mb-2 mt-6 text-base font-semibold">A bird's recordings</h4>
+			<p class="mb-3 text-sm leading-relaxed text-be-muted-fg">
+				On a bird's detail page you manage its individual audio clips. It's a good idea to make sure your birds have more than one clip, otherwise it is often easy to associate a bird with some irrelevent characteristic of a specific recording. Having multiple recordings forces you to actually recognise the bird song/call. 
+			</p>
+			<ul class="mb-3 space-y-2.5 text-sm leading-relaxed">
+				<li class="flex gap-2.5"><span class="text-be-primary">▸</span> <span><strong>Play</strong> any recording to listen to it. Each shows its Xeno-Canto quality rating and type — <span class="font-be-mono rounded-full bg-be-secondary px-2 py-0.5 text-[11px] text-be-muted-fg">song</span> / <span class="font-be-mono rounded-full bg-be-secondary px-2 py-0.5 text-[11px] text-be-muted-fg">call</span> and <span class="font-be-mono rounded-full border border-be-border px-2 py-0.5 text-[11px] text-be-muted-fg">q:A</span> (A is best) — plus a link back to the source on Xeno-Canto.</span></li>
+				<li class="flex gap-2.5"><span class="text-be-primary">▸</span> <span><strong>Add recordings</strong> pulls more clips for that species from Xeno-Canto. Filter by minimum quality and by song vs call, then tick the ones you want and download them.</span></li>
+				<li class="flex gap-2.5"><span class="text-be-primary">▸</span> <span><strong>Delete</strong> removes a bad clip (and its file). A bird must keep at least one recording, so the last one can't be deleted — remove the bird instead.</span></li>
+			</ul>
+
+			<!-- Packs -->
+			<h4 class="font-be-serif mb-2 mt-6 text-base font-semibold">Packs</h4>
+			<p class="mb-3 text-sm leading-relaxed text-be-muted-fg">
+				A <strong>pack</strong> is a named subset of your birds — “garden birds”, “warblers”, “trip to
+				the coast”. Packs don't copy anything; they're just filters.
+			</p>
+			<ul class="mb-3 space-y-2.5 text-sm leading-relaxed">
+				<li class="flex gap-2.5"><span class="text-be-primary">▸</span> <span><strong>Create</strong> one with <em>New pack</em> in the Library, or send birds straight into a new or existing pack while importing.</span></li>
+				<li class="flex gap-2.5"><span class="text-be-primary">▸</span> <span><strong>Edit</strong> a pack (the <em>Edit</em> button on the Packs tab) to rename it, add birds from your library, or remove birds. Removing a bird from a pack leaves the bird itself untouched.</span></li>
+				<li class="flex gap-2.5"><span class="text-be-primary">▸</span> <span><strong>Train</strong> straight from the pack, or <strong>Delete</strong> the pack — deleting only removes the grouping, never the birds or recordings.</span></li>
+			</ul>
+
+			<!-- Importing more -->
+			<h4 class="font-be-serif mb-2 mt-6 text-base font-semibold">Adding more birds</h4>
+			<p class="text-sm leading-relaxed text-be-muted-fg">
+				Use <em>Import</em> any time to grow your collection — pull the most common species from
+				another region, or search for specific birds by name. See
+				<a href="#setup" class="text-be-primary hover:underline">First-time setup</a> for the details.
+				Re-importing a bird you already have won't create duplicates.
+			</p>
+		</section>
+
+		<!-- 9 · Shortcuts -->
 		<section id="shortcuts">
-			<h3 class="font-be-serif mb-3 text-xl font-bold">8 · Keyboard shortcuts</h3>
+			<h3 class="font-be-serif mb-3 text-xl font-bold">9 · Keyboard shortcuts</h3>
 			<p class="mb-4 text-sm text-be-muted-fg">During a question:</p>
 			<div class="overflow-hidden rounded-xl border border-be-border bg-be-card">
 				<table class="w-full text-sm">
