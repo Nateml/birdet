@@ -13,7 +13,7 @@
 	];
 </script>
 
-<header class="flex items-center justify-between border-b border-be-border px-8 pt-8 pb-5">
+<header class="sticky top-0 z-40 flex items-center justify-between border-b border-be-border bg-be-bg px-8 pt-8 pb-5">
 	<a href="/" class="flex items-center gap-3">
 		<div
 			class="flex h-9 w-9 items-center justify-center rounded-lg border border-be-primary/20 bg-be-primary/10 text-lg"
