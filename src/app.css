@@ -103,5 +103,37 @@
 }
 
 html, body {
-    zoom: 1.3
+    zoom: 1.3;
+    /* Paint the root the app background so overscroll / rubber-banding past the
+       page doesn't flash white. */
+    background: var(--color-be-bg);
+}
+
+html {
+    color-scheme: dark;
+}
+
+body {
+    /* Stop the scroll from bouncing past the content edges. */
+    overscroll-behavior: none;
+}
+
+/* ── Themed scrollbar (Chromium/WebView2) ── */
+::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+}
+::-webkit-scrollbar-track {
+    background: var(--color-be-bg);
+}
+::-webkit-scrollbar-thumb {
+    background: var(--color-be-secondary);
+    border-radius: 8px;
+    border: 3px solid var(--color-be-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--color-be-muted-fg);
+}
+::-webkit-scrollbar-corner {
+    background: var(--color-be-bg);
 }
