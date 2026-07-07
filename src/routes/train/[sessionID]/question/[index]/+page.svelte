@@ -38,16 +38,20 @@
 	const scoreSoFar = $derived(answered.filter((a) => a.correct).length);
 	const study = $derived($session?.config.study ?? 'mixed');
 	const isCram = $derived(study === 'cram');
-	// In the mixed session the "review phase" starts once the new-card cap is spent.
-	const isReviewPhase = $derived(!isCram && newServed >= newCap);
+	// Whether the card on screen is a brand-new bird vs a scheduled review.
+	const currentIsNew = $derived(question?.is_new ?? false);
+	// New-bird budget introduced so far, counting the current card if it's new.
+	const newShown = $derived(Math.min(newCap, newServed + (currentIsNew ? 1 : 0)));
+	// Modes that introduce new birds show the new-bird budget counter.
+	const showsNewBudget = $derived(study === 'new' || study === 'mixed');
+	// The progress bar is meaningful only when there's a known target: the
+	// new-card cap (new/mixed) or the fixed cram length. A review-only run
+	// drains an unknown number of due cards, so it has no deterministic bar.
+	const showBar = $derived((isCram || showsNewBudget) && newCap > 0);
 	const progressPct = $derived(
 		isCram
-			? newCap
-				? Math.min(100, (answered.length / newCap) * 100)
-				: 0
-			: newCap
-				? Math.min(100, (newServed / newCap) * 100)
-				: 0
+			? Math.min(100, (answered.length / newCap) * 100)
+			: Math.min(100, (newServed / newCap) * 100)
 	);
 
 	// ── Audio + spectrogram ────────────────────────────────────────
@@ -408,17 +412,26 @@
 			<span class="font-be-mono text-xs text-be-muted-fg">{scoreSoFar}/{answered.length}</span>
 		{/if}
 		{#if isCram}
-			<span class="font-be-mono rounded-full bg-be-secondary px-2.5 py-1 text-xs text-be-secondary-fg">
+			<span class="font-be-mono rounded-full bg-be-secondary px-2.5 py-1 text-xs text-be-secondary-fg" title="Practice run — a fixed number of questions, no effect on your review schedule">
 				practice {Math.min(answered.length + 1, newCap)} / {newCap}
 			</span>
-		{:else if isReviewPhase}
-			<span class="font-be-mono rounded-full bg-be-accent/15 px-2.5 py-1 text-xs text-be-accent">
-				review
-			</span>
 		{:else}
-			<span class="font-be-mono rounded-full bg-be-secondary px-2.5 py-1 text-xs text-be-secondary-fg">
-				new {Math.min(newServed + 1, newCap)} / {newCap}
-			</span>
+			<!-- What this card is: a first-ever bird, or a scheduled review. -->
+			{#if currentIsNew}
+				<span class="font-be-mono rounded-full bg-be-primary/15 px-2.5 py-1 text-xs text-be-primary" title="A bird you haven't seen before">
+					new bird
+				</span>
+			{:else}
+				<span class="font-be-mono rounded-full bg-be-accent/15 px-2.5 py-1 text-xs text-be-accent" title="A bird that's due for review">
+					review
+				</span>
+			{/if}
+			<!-- New-bird budget for this session (hidden in review-only runs). -->
+			{#if showsNewBudget}
+				<span class="font-be-mono rounded-full bg-be-secondary px-2.5 py-1 text-xs text-be-secondary-fg" title="New birds introduced this session, out of the cap">
+					{newShown} / {newCap} new
+				</span>
+			{/if}
 		{/if}
 	</div>
 </header>
@@ -431,13 +444,17 @@
 			{error}
 		</div>
 	{:else if question}
-		<!-- Progress -->
-		<div class="mb-7 h-0.5 overflow-hidden rounded-full bg-be-muted">
-			<div
-				class="h-full rounded-full bg-be-primary transition-all duration-500"
-				style="width: {progressPct}%"
-			></div>
-		</div>
+		<!-- Progress (only when there's a known target; review-only runs have none) -->
+		{#if showBar}
+			<div class="mb-7 h-0.5 overflow-hidden rounded-full bg-be-muted">
+				<div
+					class="h-full rounded-full bg-be-primary transition-all duration-500"
+					style="width: {progressPct}%"
+				></div>
+			</div>
+		{:else}
+			<div class="mb-7"></div>
+		{/if}
 
 		<!-- Spectrogram -->
 		<div class="mb-5">
