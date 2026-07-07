@@ -1,13 +1,52 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { session, score, startSession, endSession } from '$lib/stores/session';
+	import { getRecordingBlobUrl } from '$lib/api/audio';
 
 	const id = page.params.sessionID;
 
 	onMount(() => {
 		if (!$session || $session.id !== id) goto('/');
+	});
+
+	// Replay any call from the review list. Blob URLs are cached per recording
+	// and revoked on unmount; one shared <audio> plays whichever the user picks.
+	let audioEl = $state<HTMLAudioElement | undefined>();
+	let playingId = $state<number | null>(null);
+	const urlCache = new Map<number, string>();
+
+	async function replay(recordingId: number) {
+		if (!audioEl) return;
+		if (playingId === recordingId) {
+			audioEl.pause();
+			playingId = null;
+			return;
+		}
+		audioEl.pause();
+		try {
+			let url = urlCache.get(recordingId);
+			if (!url) {
+				url = await getRecordingBlobUrl(recordingId);
+				urlCache.set(recordingId, url);
+			}
+			audioEl.src = url;
+			audioEl.currentTime = 0;
+			await audioEl.play();
+			playingId = recordingId;
+		} catch {
+			playingId = null;
+		}
+	}
+
+	onDestroy(() => {
+		try {
+			audioEl?.pause();
+		} catch {
+			/* noop */
+		}
+		for (const url of urlCache.values()) URL.revokeObjectURL(url);
 	});
 
 	const total = $derived($session?.answers.length ?? 0);
@@ -48,6 +87,8 @@
 	</button>
 </header>
 
+<audio bind:this={audioEl} preload="none" onended={() => (playingId = null)}></audio>
+
 {#if $session && $session.id === id}
 	<main class="mx-auto max-w-2xl px-8 py-10">
 		<div class="mb-10 flex items-center gap-5 border-b border-be-border pb-8">
@@ -64,6 +105,9 @@
 			</div>
 		</div>
 
+		<p class="font-be-mono mb-3 text-xs uppercase tracking-widest text-be-muted-fg">
+			Review · tap ▶ to hear each call again
+		</p>
 		<div class="mb-8 space-y-2">
 			{#each $session.answers as a, i (i)}
 				<div
@@ -78,11 +122,26 @@
 					{/if}
 					<div class="min-w-0 flex-1">
 						<p class="text-sm font-semibold">{a.correct_name}</p>
-						{#if !a.correct}
+						{#if a.skipped}
+							<p class="font-be-mono mt-0.5 text-xs text-be-muted-fg">skipped</p>
+						{:else if !a.correct}
 							<p class="font-be-mono mt-0.5 text-xs text-be-muted-fg">answered: {a.guess}</p>
 						{/if}
 					</div>
-					<span class="font-be-mono shrink-0 text-xs text-be-muted-fg">{i + 1}</span>
+					<button
+						onclick={() => replay(a.recording_id)}
+						aria-label={playingId === a.recording_id ? 'Pause' : 'Replay call'}
+						class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-be-border text-be-muted-fg transition-colors hover:border-be-primary/40 hover:text-be-primary"
+						class:text-be-primary={playingId === a.recording_id}
+						class:border-be-primary={playingId === a.recording_id}
+					>
+						{#if playingId === a.recording_id}
+							<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+						{:else}
+							<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4v16l14-8z"/></svg>
+						{/if}
+					</button>
+					<span class="font-be-mono w-4 shrink-0 text-right text-xs text-be-muted-fg">{i + 1}</span>
 				</div>
 			{/each}
 		</div>

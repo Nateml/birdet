@@ -5,6 +5,7 @@ export type QuestionDto = {
     bird_id: number;
     recording_id: number;
     choices: string[];
+    is_new: boolean;
 };
 
 // Mirrors Rust `commands::AnswerResult`
@@ -13,8 +14,20 @@ export type AnswerResult = {
     correct_name: string;
 };
 
-export async function getNextQuestion(pack?: string): Promise<QuestionDto> {
-    return await invoke<QuestionDto>('get_next_question', { pack: pack ?? null });
+// Returns null when the session queue is drained (no card due / new budget spent).
+// `includeReviews=false` studies only new cards (a "new-only" session).
+export async function getNextQuestion(
+    pack: string | undefined,
+    newRemaining: number,
+    includeReviews: boolean,
+    cram = false
+): Promise<QuestionDto | null> {
+    return await invoke<QuestionDto | null>('get_next_question', {
+        pack: pack ?? null,
+        newRemaining,
+        includeReviews,
+        cram
+    });
 }
 
 export async function submitAnswer(

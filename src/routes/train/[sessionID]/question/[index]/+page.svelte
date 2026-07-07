@@ -2,7 +2,9 @@
 	import { onDestroy, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { get } from 'svelte/store';
 	import { session, loadQuestion, answerCurrent } from '$lib/stores/session';
+	import { setup } from '$lib/stores/setup';
 	import { getRecordingBlobUrl } from '$lib/api/audio';
 	import { buildSpectrogramBitmap, drawSpectrogramFrame, type Spectrogram } from '$lib/spectrogram';
 	import SpectroWorker from '$lib/spectrogram.worker?worker';
@@ -16,16 +18,37 @@
 	let error = $state<string | null>(null);
 
 	let selected = $state<string | null>(null);
-	let feedback = $state<{ correct: boolean; correct_name: string; guess: string } | null>(null);
+	let feedback = $state<{
+		correct: boolean;
+		correct_name: string;
+		guess: string;
+		skipped: boolean;
+	} | null>(null);
 	let isPlaying = $state(false);
 	let hasPlayed = $state(false);
 
 	// Snapshot of this question's position (session.index advances on answer).
 	let qNum = $state(1);
-	const length = $derived($session?.config.length ?? 0);
+	// Anki-style: `length` is the new-card cap, not a fixed session length. Progress
+	// tracks new birds introduced; once the cap is hit the session keeps draining
+	// due/learning cards (the "review" phase) until the queue empties.
+	const newCap = $derived($session?.config.length ?? 0);
+	const newServed = $derived($session?.newServed ?? 0);
 	const answered = $derived($session?.answers ?? []);
 	const scoreSoFar = $derived(answered.filter((a) => a.correct).length);
-	const progressPct = $derived(length ? ((qNum - 1) / length) * 100 : 0);
+	const study = $derived($session?.config.study ?? 'mixed');
+	const isCram = $derived(study === 'cram');
+	// In the mixed session the "review phase" starts once the new-card cap is spent.
+	const isReviewPhase = $derived(!isCram && newServed >= newCap);
+	const progressPct = $derived(
+		isCram
+			? newCap
+				? Math.min(100, (answered.length / newCap) * 100)
+				: 0
+			: newCap
+				? Math.min(100, (newServed / newCap) * 100)
+				: 0
+	);
 
 	// ── Audio + spectrogram ────────────────────────────────────────
 	// The spectrogram is precomputed from the decoded buffer (works with no
@@ -68,7 +91,9 @@
 		raf = requestAnimationFrame(tick);
 	}
 
-	async function play() {
+	// `silent` suppresses error surfacing — used for autoplay, where the browser
+	// may block playback (NotAllowedError) and we just fall back to a manual press.
+	async function play(silent = false) {
 		if (!spec) return;
 		if (posMs >= durationMs) posMs = 0; // replay from start when finished
 		hasPlayed = true;
@@ -83,6 +108,11 @@
 			if (posMs > 0) audioEl.currentTime = posMs / 1000;
 			await audioEl.play();
 		} catch (e) {
+			if (silent) {
+				isPlaying = false;
+				hasPlayed = false;
+				return;
+			}
 			audioErr = `${(e as Error)?.name ?? 'Error'}: ${(e as Error)?.message ?? e}`;
 		}
 		playStart = performance.now() - posMs;
@@ -200,6 +230,9 @@
 		bitmap = buildSpectrogramBitmap(spec.columns, 148);
 		ready = true;
 		drawAt(0);
+		// Auto-play once analysis finishes (opt-out in Settings). Silent: if the
+		// webview blocks autoplay, the user just presses Play — no scary error.
+		if (get(setup).autoplay && !feedback) play(true);
 	}
 
 	// Load (and reload) the question on every navigation to this route — going
@@ -278,10 +311,63 @@
 		selected = choice;
 		try {
 			const rec = await answerCurrent(choice);
-			if (rec) feedback = { correct: rec.correct, correct_name: rec.correct_name, guess: choice };
+			if (rec)
+				feedback = {
+					correct: rec.correct,
+					correct_name: rec.correct_name,
+					guess: choice,
+					skipped: false
+				};
 		} catch (e) {
 			selected = null;
 			error = (e as Error)?.message ?? 'Failed to submit answer.';
+		}
+	}
+
+	// "I don't know" — reveal the answer without a guess. Counts as not-correct.
+	async function skip() {
+		if (feedback) return;
+		selected = null;
+		try {
+			const rec = await answerCurrent('', true);
+			if (rec)
+				feedback = {
+					correct: false,
+					correct_name: rec.correct_name,
+					guess: '',
+					skipped: true
+				};
+		} catch (e) {
+			error = (e as Error)?.message ?? 'Failed to submit answer.';
+		}
+	}
+
+	// Keyboard: Space/K play·pause, R replay, 1-9 pick, S skip, Enter/→ next.
+	function onKey(e: KeyboardEvent) {
+		const t = e.target as HTMLElement | null;
+		if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+		if (loading || error || !question) return;
+		const k = e.key;
+		if (k === ' ' || k === 'k') {
+			e.preventDefault();
+			togglePlay();
+		} else if (k === 'r' || k === 'R') {
+			e.preventDefault();
+			restart();
+		} else if (!feedback) {
+			if (k >= '1' && k <= '9') {
+				const idx = +k - 1;
+				if (idx < question.choices.length) {
+					e.preventDefault();
+					choose(question.choices[idx]);
+				}
+			} else if (k === 's' || k === 'S') {
+				e.preventDefault();
+				skip();
+			}
+		} else if (k === 'Enter' || k === 'ArrowRight') {
+			e.preventDefault();
+			next();
 		}
 	}
 
@@ -305,6 +391,8 @@
 	}
 </script>
 
+<svelte:window onkeydown={onKey} />
+
 <audio bind:this={audioEl} src={audioUrl ?? ''} preload="auto" onended={onEnded}></audio>
 
 <header class="flex items-center justify-between border-b border-be-border px-6 pt-6 pb-4">
@@ -319,9 +407,19 @@
 		{#if answered.length > 0}
 			<span class="font-be-mono text-xs text-be-muted-fg">{scoreSoFar}/{answered.length}</span>
 		{/if}
-		<span class="font-be-mono rounded-full bg-be-secondary px-2.5 py-1 text-xs text-be-secondary-fg">
-			{qNum} / {length}
-		</span>
+		{#if isCram}
+			<span class="font-be-mono rounded-full bg-be-secondary px-2.5 py-1 text-xs text-be-secondary-fg">
+				practice {Math.min(answered.length + 1, newCap)} / {newCap}
+			</span>
+		{:else if isReviewPhase}
+			<span class="font-be-mono rounded-full bg-be-accent/15 px-2.5 py-1 text-xs text-be-accent">
+				review
+			</span>
+		{:else}
+			<span class="font-be-mono rounded-full bg-be-secondary px-2.5 py-1 text-xs text-be-secondary-fg">
+				new {Math.min(newServed + 1, newCap)} / {newCap}
+			</span>
+		{/if}
 	</div>
 </header>
 
@@ -409,9 +507,16 @@
 		</div>
 
 		<!-- Choices -->
-		<p class="font-be-mono mb-3 text-xs uppercase tracking-widest text-be-muted-fg">Identify the bird</p>
+		<div class="mb-3 flex items-center justify-between">
+			<p class="font-be-mono text-xs uppercase tracking-widest text-be-muted-fg">Identify the bird</p>
+			<p class="font-be-mono hidden text-xs text-be-muted-fg sm:block">
+				<kbd class="rounded bg-be-muted px-1 py-0.5">1–{question.choices.length}</kbd> pick ·
+				<kbd class="rounded bg-be-muted px-1 py-0.5">space</kbd> play ·
+				<kbd class="rounded bg-be-muted px-1 py-0.5">S</kbd> skip
+			</p>
+		</div>
 		<div class="grid grid-cols-2 gap-3">
-			{#each question.choices as choice (choice)}
+			{#each question.choices as choice, i (choice)}
 				{@const isCorrectChoice = feedback ? choice === feedback.correct_name : false}
 				{@const isSelected = choice === selected}
 				<button
@@ -431,6 +536,11 @@
 							<svg class="mt-0.5 shrink-0 text-emerald-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/></svg>
 						{:else if feedback && isSelected}
 							<svg class="mt-0.5 shrink-0 text-red-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+						{:else}
+							<span
+								class="font-be-mono mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded bg-be-muted text-[10px] text-be-muted-fg"
+								>{i + 1}</span
+							>
 						{/if}
 						<span class="text-sm font-semibold leading-snug">{choice}</span>
 					</div>
@@ -438,17 +548,33 @@
 			{/each}
 		</div>
 
+		<!-- Skip -->
+		{#if !feedback}
+			<button
+				onclick={skip}
+				class="mt-3 w-full rounded-lg border border-be-border/60 py-2.5 text-sm text-be-muted-fg transition-colors hover:border-be-border hover:text-be-fg"
+			>
+				Skip · I don't know
+			</button>
+		{/if}
+
 		<!-- Feedback + next -->
 		{#if feedback}
 			<div class="mt-5 flex items-center justify-between gap-4">
 				<p class="text-sm font-semibold {feedback.correct ? 'text-emerald-400' : 'text-red-400'}">
-					{feedback.correct ? 'Correct!' : `That was ${feedback.correct_name}.`}
+					{#if feedback.correct}
+						Correct!
+					{:else if feedback.skipped}
+						Skipped — that was {feedback.correct_name}.
+					{:else}
+						That was {feedback.correct_name}.
+					{/if}
 				</p>
 				<button
 					onclick={next}
 					class="flex shrink-0 items-center gap-1.5 rounded-lg bg-be-primary px-5 py-2.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90"
 				>
-					{$session?.finished ? 'See Results' : 'Next Bird'}
+					Next Bird
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
 				</button>
 			</div>

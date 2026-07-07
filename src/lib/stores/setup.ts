@@ -3,10 +3,10 @@ import type { Mode } from './session';
 
 // Persisted quiz defaults so a session can start in one click without a setup
 // step each time. Edited from the Options panel on the home screen.
-export type QuizSetup = { length: number; mode: Mode };
+export type QuizSetup = { length: number; mode: Mode; autoplay: boolean };
 
 const KEY = 'birdet:setup';
-const DEFAULT: QuizSetup = { length: 10, mode: 'multiple' };
+const DEFAULT: QuizSetup = { length: 10, mode: 'multiple', autoplay: true };
 
 function load(): QuizSetup {
     if (typeof localStorage === 'undefined') return DEFAULT;
