@@ -11,6 +11,7 @@ pub struct Question {
     pub bird_id: i64,
     pub recording_id: i64,
     pub choices: Vec<String>, // For multiple choice questions
+    pub is_new: bool,         // first-ever exposure (counts against the new-card cap)
 }
 
 #[tauri::command]
@@ -18,9 +19,19 @@ pub async fn health() -> &'static str {
     "ok"
 }
  
+/// Return the next card to study, or `None` when the session queue is drained.
+/// `pack` filters the candidate pool (None = the whole library). `new_remaining`
+/// is the remaining new-card budget. `include_reviews=false` studies only new
+/// cards (a "new-only" session); with `new_remaining=0` you get a review-only run.
 #[tauri::command]
-pub async fn get_next_question(state: State<'_, AppState>, pack: Option<String>) -> Result<Question, String> {
-    crate::services::quiz::next_question(&state.db, pack)
+pub async fn get_next_question(
+    state: State<'_, AppState>,
+    pack: Option<String>,
+    new_remaining: i64,
+    include_reviews: bool,
+    cram: bool,
+) -> Result<Option<Question>, String> {
+    crate::services::quiz::next_question(&state.db, pack, new_remaining, include_reviews, cram)
         .await
         .map_err(|e| e.to_string())
 }
@@ -45,7 +56,31 @@ pub async fn submit_answer(state: State<'_, AppState>, payload: AnswerPayload) -
         .map_err(|e| e.to_string())
 }
 
-/// Resolve a recording's bundled audio file to an absolute path on disk.
+/// Resolve a recording filename to an absolute path, preferring imported audio
+/// in the writable app-data dir and falling back to the bundled resources.
+/// Imported recordings download to `app_data_dir/recordings/`; the original seed
+/// audio ships read-only under `BaseDirectory::Resource`.
+pub fn resolve_recording(app: &AppHandle, filename: &str) -> Result<std::path::PathBuf, String> {
+    if let Ok(dir) = app.path().app_data_dir() {
+        let imported = dir.join("recordings").join(filename);
+        if imported.exists() {
+            return Ok(imported);
+        }
+    }
+    app.path()
+        .resolve(format!("resources/recordings/{}", filename), BaseDirectory::Resource)
+        .map_err(|e| e.to_string())
+}
+
+async fn recording_filename(state: &AppState, recording_id: i64) -> Result<String, String> {
+    sqlx::query_scalar("SELECT filename FROM recordings WHERE id = ?1")
+        .bind(recording_id)
+        .fetch_one(&state.db.0)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Resolve a recording's audio file to an absolute path on disk.
 /// Frontend wraps this with `convertFileSrc()` to feed the asset protocol.
 #[tauri::command]
 pub async fn get_recording_path(
@@ -53,21 +88,12 @@ pub async fn get_recording_path(
     state: State<'_, AppState>,
     recording_id: i64,
 ) -> Result<String, String> {
-    let filename: String = sqlx::query_scalar("SELECT filename FROM recordings WHERE id = ?1")
-        .bind(recording_id)
-        .fetch_one(&state.db.0)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let path = app
-        .path()
-        .resolve(format!("resources/recordings/{}", filename), BaseDirectory::Resource)
-        .map_err(|e| e.to_string())?;
-
+    let filename = recording_filename(&state, recording_id).await?;
+    let path = resolve_recording(&app, &filename)?;
     Ok(path.to_string_lossy().into_owned())
 }
 
-/// Read a recording's bundled audio file and return the raw bytes.
+/// Read a recording's audio file and return the raw bytes.
 /// The frontend wraps these in a same-origin `Blob` URL so the Web Audio
 /// AnalyserNode isn't cross-origin-tainted (needed for the live spectrogram).
 #[tauri::command]
@@ -76,19 +102,27 @@ pub async fn get_recording_bytes(
     state: State<'_, AppState>,
     recording_id: i64,
 ) -> Result<tauri::ipc::Response, String> {
-    let filename: String = sqlx::query_scalar("SELECT filename FROM recordings WHERE id = ?1")
-        .bind(recording_id)
-        .fetch_one(&state.db.0)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let path = app
-        .path()
-        .resolve(format!("resources/recordings/{}", filename), BaseDirectory::Resource)
-        .map_err(|e| e.to_string())?;
-
+    let filename = recording_filename(&state, recording_id).await?;
+    let path = resolve_recording(&app, &filename)?;
     let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Read a persisted app setting (API keys, defaults). Empty string = unset,
+/// so the frontend can treat it uniformly.
+#[tauri::command]
+pub async fn get_setting(state: State<'_, AppState>, key: String) -> Result<String, String> {
+    crate::services::settings::get_setting(&state.db, &key)
+        .await
+        .map(|v| v.unwrap_or_default())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_setting(state: State<'_, AppState>, key: String, value: String) -> Result<(), String> {
+    crate::services::settings::set_setting(&state.db, &key, &value)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -99,16 +133,269 @@ pub async fn get_packs(state: State<'_, AppState>) -> Result<Vec<Pack>, String> 
 }
 
 #[derive(Serialize)]
+pub struct BirdListItem {
+    pub id: i64,
+    pub common_name: String,
+    pub scientific_name: String,
+    pub family: Option<String>,
+    pub region: Option<String>,
+    pub recording_count: i64,
+}
+
+#[tauri::command]
+pub async fn get_birds(state: State<'_, AppState>) -> Result<Vec<BirdListItem>, String> {
+    crate::services::packs::get_birds(&state.db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+pub struct BirdPackTag {
+    pub bird_id: i64,
+    pub pack_id: String,
+    pub pack_name: String,
+}
+
+/// One row per (bird, pack) pair, for rendering pack tags in the library.
+#[tauri::command]
+pub async fn get_bird_packs(state: State<'_, AppState>) -> Result<Vec<BirdPackTag>, String> {
+    crate::services::packs::get_bird_packs(&state.db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Recordings stored for a bird (for the per-bird recording manager).
+#[tauri::command]
+pub async fn get_bird_recordings(
+    state: State<'_, AppState>,
+    bird_id: i64,
+) -> Result<Vec<crate::services::import::RecordingInfo>, String> {
+    crate::services::import::get_bird_recordings(&state.db, bird_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Delete a single recording (DB row, links, and downloaded file).
+#[tauri::command]
+pub async fn delete_recording(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    recording_id: i64,
+) -> Result<(), String> {
+    crate::services::import::delete_recording(&app, &state.db, recording_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Search Xeno-Canto for more recordings of a bird (excludes ones already had).
+#[tauri::command]
+pub async fn search_bird_recordings(
+    state: State<'_, AppState>,
+    bird_id: i64,
+    quality: Option<String>,
+    rec_type: Option<String>,
+) -> Result<Vec<crate::services::import::RecordingCandidate>, String> {
+    crate::services::import::search_recordings(&state.db, bird_id, quality, rec_type)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Back-fill quality + type on older recordings. Returns the count updated.
+#[tauri::command]
+pub async fn backfill_recording_meta(state: State<'_, AppState>) -> Result<i64, String> {
+    crate::services::import::backfill_recording_meta(&state.db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Download and add specific Xeno-Canto recordings (by xc_id) to a bird.
+#[tauri::command]
+pub async fn add_bird_recordings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    bird_id: i64,
+    xc_ids: Vec<String>,
+) -> Result<i64, String> {
+    crate::services::import::add_recordings(&app, &state.db, bird_id, xc_ids)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Manual pack: name + explicit bird selection.
+#[tauri::command]
+pub async fn create_pack(
+    state: State<'_, AppState>,
+    name: String,
+    bird_ids: Vec<i64>,
+) -> Result<String, String> {
+    crate::services::packs::create_pack_from_birds(&state.db, &name, &bird_ids)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Birds contained in a pack (for the pack editor).
+#[tauri::command]
+pub async fn get_pack_birds(
+    state: State<'_, AppState>,
+    pack_id: String,
+) -> Result<Vec<BirdListItem>, String> {
+    crate::services::packs::get_pack_birds(&state.db, &pack_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rename_pack(
+    state: State<'_, AppState>,
+    pack_id: String,
+    name: String,
+) -> Result<(), String> {
+    crate::services::packs::rename_pack(&state.db, &pack_id, &name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_pack(state: State<'_, AppState>, pack_id: String) -> Result<(), String> {
+    crate::services::packs::delete_pack(&state.db, &pack_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn add_birds_to_pack(
+    state: State<'_, AppState>,
+    pack_id: String,
+    bird_ids: Vec<i64>,
+) -> Result<(), String> {
+    crate::services::packs::add_birds_to_pack(&state.db, &pack_id, &bird_ids)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_bird_from_pack(
+    state: State<'_, AppState>,
+    pack_id: String,
+    bird_id: i64,
+) -> Result<(), String> {
+    crate::services::packs::remove_bird_from_pack(&state.db, &pack_id, bird_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+pub struct RegionItem {
+    pub code: String,
+    pub name: String,
+}
+
+/// List sub-regions for the region picker (cached). `level` ∈ country |
+/// subnational1 | subnational2; `parent` is 'world' for countries.
+#[tauri::command]
+pub async fn list_regions(
+    state: State<'_, AppState>,
+    level: String,
+    parent: String,
+) -> Result<Vec<RegionItem>, String> {
+    crate::services::regions::list_regions(&state.db, &level, &parent)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Filter pack: a region (eBird spplist ∩ library) and/or a family.
+#[tauri::command]
+pub async fn create_pack_from_filter(
+    state: State<'_, AppState>,
+    name: Option<String>,
+    region: Option<String>,
+    family: Option<String>,
+) -> Result<String, String> {
+    let region = region.filter(|r| !r.trim().is_empty());
+    let family = family.filter(|f| !f.trim().is_empty());
+    let result = match (region, family) {
+        (Some(r), fam) => {
+            crate::services::packs::create_pack_from_region(&state.db, name, &r, fam.as_deref()).await
+        }
+        (None, Some(f)) => crate::services::packs::create_pack_from_family(&state.db, name, &f).await,
+        (None, None) => Err(anyhow::anyhow!("Set a region or family to filter by.")),
+    };
+    result.map_err(|e| e.to_string())
+}
+
+/// Import birds from eBird + Xeno-Canto. Emits `import://progress` events and
+/// returns a summary when finished.
+#[tauri::command]
+pub async fn import_birds(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    params: crate::services::import::ImportParams,
+) -> Result<crate::services::import::ImportSummary, String> {
+    crate::services::import::import_birds(&app, &state.db, params)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Search the cached eBird taxonomy by name for the manual add-birds flow.
+#[tauri::command]
+pub async fn search_species(
+    state: State<'_, AppState>,
+    query: String,
+) -> Result<Vec<crate::services::taxonomy::SpeciesResult>, String> {
+    crate::services::taxonomy::search(&state.db, &query, 30)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Import specific species by eBird code (manual search-and-add). Emits
+/// `import://progress` and returns a summary.
+#[tauri::command]
+pub async fn import_species(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ebird_codes: Vec<String>,
+    quality: Option<String>,
+    rec_type: Option<String>,
+    max_per_species: Option<i64>,
+    pack_ids: Option<Vec<String>>,
+    new_pack_name: Option<String>,
+) -> Result<crate::services::import::ImportSummary, String> {
+    crate::services::import::import_species(
+        &app,
+        &state.db,
+        ebird_codes,
+        quality,
+        rec_type,
+        max_per_species.unwrap_or(1),
+        pack_ids.unwrap_or_default(),
+        new_pack_name,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
 pub struct BirdStat {
     pub common_name: String,
     pub seen: i64,
     pub correct: i64,
+    pub state: String,          // new | learning | review | mastered
+    pub interval_days: f64,
+    pub ease: f64,
+    pub lapses: i64,
+    pub due_at: Option<String>, // SQLite timestamp; None = new/unscheduled
 }
 
 #[derive(Serialize)]
 pub struct Stats {
     pub total_seen: i64,
     pub total_correct: i64,
+    pub total_birds: i64,   // every bird in the library
+    pub new_count: i64,     // never studied
+    pub learning_count: i64,
+    pub review_count: i64,  // young reviews (interval < mature threshold)
+    pub mastered_count: i64,// mature reviews (interval >= threshold)
+    pub due_count: i64,     // cards due now
     pub birds: Vec<BirdStat>,
 }
 

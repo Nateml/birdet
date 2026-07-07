@@ -49,7 +49,27 @@ fn main() -> anyhow::Result<()> {
             commands::get_packs,
             commands::get_recording_path,
             commands::get_recording_bytes,
-            commands::get_stats
+            commands::get_stats,
+            commands::get_setting,
+            commands::set_setting,
+            commands::get_birds,
+            commands::get_bird_packs,
+            commands::get_bird_recordings,
+            commands::delete_recording,
+            commands::search_bird_recordings,
+            commands::add_bird_recordings,
+            commands::backfill_recording_meta,
+            commands::create_pack,
+            commands::create_pack_from_filter,
+            commands::list_regions,
+            commands::import_birds,
+            commands::search_species,
+            commands::import_species,
+            commands::get_pack_birds,
+            commands::rename_pack,
+            commands::delete_pack,
+            commands::add_birds_to_pack,
+            commands::remove_bird_from_pack
             //commands::generate_official_pack
             // Add commands here
         ])
