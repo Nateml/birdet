@@ -196,6 +196,37 @@
 				<p class="font-be-serif font-semibold">Birdet</p>
 				<p class="text-xs text-be-muted-fg">Learn bird calls by ear.</p>
 			</div>
+			<span class="font-be-mono ml-auto rounded-full bg-be-accent/15 px-2.5 py-1 text-xs text-be-accent">
+				alpha build
+			</span>
 		</div>
+
+		<div class="mt-4 space-y-2 border-t border-be-border pt-4 text-sm">
+			<div class="flex items-center gap-2">
+				<span class="w-16 shrink-0 text-xs text-be-muted-fg">Made by</span>
+				<span>nateml</span>
+			</div>
+			<div class="flex items-center gap-2">
+				<span class="w-16 shrink-0 text-xs text-be-muted-fg">GitHub</span>
+				<a
+					href="https://github.com/Nateml/birdet"
+					target="_blank"
+					rel="noopener noreferrer"
+					class="text-be-primary hover:underline"
+				>
+					github.com/Nateml/birdet
+				</a>
+			</div>
+			<div class="flex items-center gap-2">
+				<span class="w-16 shrink-0 text-xs text-be-muted-fg">Contact</span>
+				<a href="mailto:nate.mac.dev@gmail.com" class="text-be-primary hover:underline">
+					nate.mac.dev@gmail.com
+				</a>
+			</div>
+		</div>
+
+		<p class="mt-4 rounded-lg border border-be-accent/30 bg-be-accent/[0.06] px-3 py-2 text-xs leading-relaxed text-be-muted-fg">
+			This is an early <strong class="text-be-fg">alpha build</strong> — expect bugs and incomplete/missing features. Feedback and bug reports are very welcome.
+		</p>
 	</div>
 </main>
