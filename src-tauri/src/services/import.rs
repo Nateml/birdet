@@ -725,6 +725,60 @@ pub async fn delete_recording(app: &AppHandle, db: &Db, recording_id: i64) -> Re
     Ok(())
 }
 
+/// Delete a bird entirely: its recordings (rows + downloaded files), pack links,
+/// mastery/history references, and the bird row. Errors if the id doesn't exist.
+pub async fn delete_bird(app: &AppHandle, db: &Db, bird_id: i64) -> Result<()> {
+    // Downloaded filenames to remove from disk after the DB delete commits.
+    let filenames: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT filename FROM recordings WHERE bird_id = ?1")
+            .bind(bird_id)
+            .fetch_all(&db.0)
+            .await?;
+
+    let mut tx = db.0.begin().await?;
+    // Detach history refs (foreign keys may not be enforced, so be explicit).
+    sqlx::query("UPDATE history SET recording_ID = NULL WHERE recording_ID IN (SELECT id FROM recordings WHERE bird_id = ?1)")
+        .bind(bird_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE history SET bird_ID = NULL WHERE bird_ID = ?1")
+        .bind(bird_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM pack_recordings WHERE recording_id IN (SELECT id FROM recordings WHERE bird_id = ?1)")
+        .bind(bird_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM mastery WHERE bird_id = ?1")
+        .bind(bird_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM recordings WHERE bird_id = ?1")
+        .bind(bird_id)
+        .execute(&mut *tx)
+        .await?;
+    let res = sqlx::query("DELETE FROM birds WHERE id = ?1")
+        .bind(bird_id)
+        .execute(&mut *tx)
+        .await?;
+    if res.rows_affected() == 0 {
+        return Err(anyhow!("Bird {} not found.", bird_id));
+    }
+    tx.commit().await?;
+
+    // Remove downloaded audio files (writable copies only; never bundled seeds).
+    if let Ok(dir) = app.path().app_data_dir() {
+        let rec_dir = dir.join("recordings");
+        for name in filenames.into_iter().flatten() {
+            let path = rec_dir.join(&name);
+            if path.exists() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Fetch one species' Xeno-Canto audio, download up to `max_per_species` clips,
 /// and upsert the bird + recordings. Returns `(Some(bird_id), n)` if any audio
 /// was found (bird stored even if a download fails), else `(None, 0)`. Paces

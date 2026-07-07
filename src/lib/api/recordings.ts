@@ -32,6 +32,10 @@ export async function deleteRecording(recordingId: number): Promise<void> {
     await invoke('delete_recording', { recordingId });
 }
 
+export async function deleteBird(birdId: number): Promise<void> {
+    await invoke('delete_bird', { birdId });
+}
+
 export async function searchBirdRecordings(
     birdId: number,
     quality?: string,

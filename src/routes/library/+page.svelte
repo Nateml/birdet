@@ -143,6 +143,10 @@
 		sel = null;
 		await onDetailChanged();
 	}
+	async function onBirdDeleted() {
+		sel = null;
+		await onDetailChanged();
+	}
 
 	const filteredBirds = $derived(
 		query.trim()
@@ -287,7 +291,7 @@
 					{/key}
 				{:else if sel?.kind === 'bird'}
 					{#key sel.id}
-						<BirdDetail birdId={sel.id} onChanged={onDetailChanged} />
+						<BirdDetail birdId={sel.id} onChanged={onDetailChanged} onDeleted={onBirdDeleted} />
 					{/key}
 				{:else}
 					<div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">

@@ -187,6 +187,18 @@ pub async fn delete_recording(
         .map_err(|e| e.to_string())
 }
 
+/// Delete a bird entirely (recordings, files, pack links, and the bird row).
+#[tauri::command]
+pub async fn delete_bird(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    bird_id: i64,
+) -> Result<(), String> {
+    crate::services::import::delete_bird(&app, &state.db, bird_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Search Xeno-Canto for more recordings of a bird (excludes ones already had).
 #[tauri::command]
 pub async fn search_bird_recordings(

@@ -1,23 +1,28 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { getBirds, type BirdListItem } from '$lib/api/packs';
 	import { getRecordingBlobUrl } from '$lib/api/audio';
 	import {
 		getBirdRecordings,
 		deleteRecording,
+		deleteBird,
 		searchBirdRecordings,
 		addBirdRecordings,
 		type RecordingInfo,
 		type RecordingCandidate
 	} from '$lib/api/recordings';
+	import { runImportJob, importJob } from '$lib/stores/importJob';
 
 	let {
 		birdId,
 		standalone = false,
-		onChanged
+		onChanged,
+		onDeleted
 	}: {
 		birdId: number;
 		standalone?: boolean;
 		onChanged?: () => void;
+		onDeleted?: () => void;
 	} = $props();
 
 	let bird = $state<BirdListItem | null>(null);
@@ -41,6 +46,7 @@
 	let candidates = $state<RecordingCandidate[]>([]);
 	let searched = $state(false);
 	let toAdd = $state<Set<string>>(new Set());
+	let confirmingDeleteBird = $state(false);
 
 	let loadedId: number | null = null;
 	$effect(() => {
@@ -70,6 +76,7 @@
 		candidates = [];
 		toAdd = new Set();
 		confirmDelete = null;
+		confirmingDeleteBird = false;
 		try {
 			const birds = await getBirds();
 			bird = birds.find((b) => b.id === birdId) ?? null;
@@ -143,11 +150,13 @@
 	}
 
 	async function saveAdditions() {
-		if (busy || toAdd.size === 0) return;
+		if (busy || toAdd.size === 0 || $importJob.active) return;
 		busy = true;
 		searchError = null;
 		try {
-			await addBirdRecordings(birdId, [...toAdd]);
+			// Route the download through the global import guard so it shows in the
+			// indicator and can't overlap another import.
+			await runImportJob('recordings', () => addBirdRecordings(birdId, [...toAdd]));
 			recordings = await getBirdRecordings(birdId);
 			candidates = candidates.filter((c) => !toAdd.has(c.xc_id));
 			toAdd = new Set();
@@ -155,6 +164,20 @@
 		} catch (e) {
 			searchError = (e as string) ?? 'Add failed.';
 		} finally {
+			busy = false;
+		}
+	}
+
+	async function doDeleteBird() {
+		if (busy) return;
+		busy = true;
+		error = null;
+		try {
+			await deleteBird(birdId);
+			if (standalone) goto('/library');
+			else onDeleted?.();
+		} catch (e) {
+			error = (e as string) ?? 'Delete failed.';
 			busy = false;
 		}
 	}
@@ -250,9 +273,13 @@
 						{/if}
 					</div>
 					{#if candidates.length > 0}
-						<button onclick={saveAdditions} disabled={busy || toAdd.size === 0}
+						<button onclick={saveAdditions} disabled={busy || toAdd.size === 0 || $importJob.active}
 							class="mt-3 w-full rounded-lg bg-be-primary px-4 py-2 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50">
-							{toAdd.size ? `Add ${toAdd.size} recording${toAdd.size > 1 ? 's' : ''}` : 'Select recordings to add'}
+							{$importJob.active
+								? 'Import in progress…'
+								: toAdd.size
+									? `Add ${toAdd.size} recording${toAdd.size > 1 ? 's' : ''}`
+									: 'Select recordings to add'}
 						</button>
 					{/if}
 				{/if}
@@ -307,5 +334,20 @@
 				{/each}
 			</div>
 		{/if}
+
+		<div class="mt-8 border-t border-be-border pt-6">
+			{#if confirmingDeleteBird}
+				<div class="flex flex-wrap items-center gap-2 text-sm">
+					<span class="text-be-muted-fg">Delete this bird and all its recordings?</span>
+					<button onclick={doDeleteBird} disabled={busy}
+						class="rounded-lg bg-be-destructive px-3 py-1.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50">Delete bird</button>
+					<button onclick={() => (confirmingDeleteBird = false)}
+						class="rounded-lg border border-be-border px-3 py-1.5 text-sm transition-colors hover:bg-be-secondary">Cancel</button>
+				</div>
+			{:else}
+				<button onclick={() => (confirmingDeleteBird = true)} disabled={busy}
+					class="text-sm text-be-muted-fg transition-colors hover:text-be-destructive">Delete bird</button>
+			{/if}
+		</div>
 	{/if}
 </div>
