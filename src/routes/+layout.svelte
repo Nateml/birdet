@@ -10,6 +10,32 @@
 
     onMount(initTheme);
 
+    // F11 toggles OS fullscreen (hides the window title bar); Esc leaves it.
+    // Tauri-only — guarded so `pnpm dev` in a plain browser is a no-op.
+    async function toggleFullscreen(force?: boolean) {
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            const w = getCurrentWindow();
+            const fs = force ?? !(await w.isFullscreen());
+            await w.setFullscreen(fs);
+        } catch {
+            // not running under Tauri
+        }
+    }
+
+    onMount(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'F11') {
+                e.preventDefault();
+                toggleFullscreen();
+            } else if (e.key === 'Escape') {
+                toggleFullscreen(false);
+            }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    });
+
     const path = $derived(page.url.pathname);
     const onHome = $derived(path === '/');
     const onTrain = $derived(path === '/train');
