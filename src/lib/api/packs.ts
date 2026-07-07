@@ -67,3 +67,26 @@ export async function addBirdsToPack(packId: string, birdIds: number[]): Promise
 export async function removeBirdFromPack(packId: string, birdId: number): Promise<void> {
     await invoke('remove_bird_from_pack', { packId, birdId });
 }
+
+// Export a pack to a JSON file in Downloads; returns the path written.
+export async function exportPack(packId: string): Promise<string> {
+    return await invoke<string>('export_pack', { packId });
+}
+
+// Mirrors Rust `models::PackImportResult`.
+export type PackImportResult = {
+    pack_id: string;
+    name: string;
+    linked_existing: number;
+    downloaded_new: number;
+    skipped: number;
+    recordings_added: number;
+};
+
+// Import a pack from the text contents of an exported file.
+export async function importPack(
+    contents: string,
+    maxPerSpecies?: number
+): Promise<PackImportResult> {
+    return await invoke<PackImportResult>('import_pack', { contents, maxPerSpecies });
+}

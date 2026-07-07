@@ -69,7 +69,9 @@ fn main() -> anyhow::Result<()> {
             commands::rename_pack,
             commands::delete_pack,
             commands::add_birds_to_pack,
-            commands::remove_bird_from_pack
+            commands::remove_bird_from_pack,
+            commands::export_pack,
+            commands::import_pack
             //commands::generate_official_pack
             // Add commands here
         ])

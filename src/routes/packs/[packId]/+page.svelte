@@ -14,6 +14,7 @@
 		deletePack,
 		addBirdsToPack,
 		removeBirdFromPack,
+		exportPack,
 		type BirdListItem
 	} from '$lib/api/packs';
 
@@ -113,6 +114,22 @@
 			adding = false;
 		} catch (e) {
 			error = (e as string) ?? 'Add failed.';
+		} finally {
+			busy = false;
+		}
+	}
+
+	let exportMsg = $state<string | null>(null);
+	async function doExport() {
+		if (busy) return;
+		busy = true;
+		error = null;
+		exportMsg = null;
+		try {
+			const path = await exportPack(packId);
+			exportMsg = `Saved to ${path}`;
+		} catch (e) {
+			error = (e as string) ?? 'Export failed.';
 		} finally {
 			busy = false;
 		}
@@ -236,8 +253,15 @@
 				<button onclick={() => (confirmingDelete = true)}
 					class="text-sm text-be-muted-fg transition-colors hover:text-be-destructive">Delete pack</button>
 			{/if}
-			<button onclick={train} disabled={packBirds.length === 0}
-				class="rounded-lg bg-be-primary px-5 py-2.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50">Train</button>
+			<div class="flex items-center gap-2.5">
+				<button onclick={doExport} disabled={busy || packBirds.length === 0} title="Save this pack as a shareable file"
+					class="rounded-lg border border-be-border px-4 py-2.5 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50">Export</button>
+				<button onclick={train} disabled={packBirds.length === 0}
+					class="rounded-lg bg-be-primary px-5 py-2.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50">Train</button>
+			</div>
 		</div>
+		{#if exportMsg}
+			<p class="mt-3 break-all text-right text-xs text-be-muted-fg">{exportMsg}</p>
+		{/if}
 	{/if}
 </main>

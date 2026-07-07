@@ -339,6 +339,113 @@ pub async fn import_species(
     Ok(ImportSummary { species_imported, species_skipped, recordings_added, pack_id })
 }
 
+/// Import a pack from an exported `birdet-pack` JSON file. Birds already in the
+/// library are linked as-is; missing ones (by eBird code) are downloaded from
+/// Xeno-Canto. Creates a new pack and returns a per-category tally.
+pub async fn import_pack(
+    app: &AppHandle,
+    db: &Db,
+    contents: String,
+    max_per_species: i64,
+) -> Result<crate::models::PackImportResult> {
+    let file: crate::models::PackFile = serde_json::from_str(&contents)
+        .map_err(|e| anyhow!("Not a valid Birdet pack file: {}", e))?;
+    if file.format != "birdet-pack" {
+        return Err(anyhow!("Unrecognised file — expected a Birdet pack export."));
+    }
+    let name = {
+        let n = file.name.trim();
+        if n.is_empty() { "Imported pack".to_string() } else { n.to_string() }
+    };
+
+    // Resolve each bird against the library; collect the ones we must download.
+    let mut bird_ids: Vec<i64> = Vec::new();
+    let mut linked_existing = 0i64;
+    let mut skipped = 0i64;
+    let mut missing_codes: Vec<String> = Vec::new();
+    for b in &file.birds {
+        let mut id: Option<i64> = None;
+        if let Some(code) = b.ebird_code.as_ref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
+            id = sqlx::query_scalar("SELECT id FROM birds WHERE ebird_code = ?1")
+                .bind(code)
+                .fetch_optional(&db.0)
+                .await?;
+        }
+        if id.is_none() {
+            id = sqlx::query_scalar("SELECT id FROM birds WHERE scientific_name = ?1")
+                .bind(&b.scientific_name)
+                .fetch_optional(&db.0)
+                .await?;
+        }
+        match id {
+            Some(i) => {
+                bird_ids.push(i);
+                linked_existing += 1;
+            }
+            None => match b.ebird_code.as_ref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
+                Some(code) => missing_codes.push(code.to_string()),
+                None => skipped += 1, // no eBird code → nothing to download
+            },
+        }
+    }
+
+    // Download the missing birds from Xeno-Canto.
+    let mut downloaded_new = 0i64;
+    let mut recordings_added = 0i64;
+    if !missing_codes.is_empty() {
+        let xc_key = settings::get_setting(db, "xc_api_key")
+            .await?
+            .filter(|k| !k.trim().is_empty())
+            .ok_or_else(|| anyhow!("Missing Xeno-Canto API key — add it in Settings."))?;
+        let client = regions::build_client()?;
+        let rec_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| anyhow!("app data dir: {}", e))?
+            .join("recordings");
+        std::fs::create_dir_all(&rec_dir)?;
+
+        taxonomy::ensure(db).await?; // make sure taxa_for can resolve the codes
+        let taxa = taxonomy::taxa_for(db, &missing_codes).await?;
+        skipped += missing_codes.len() as i64 - taxa.len() as i64; // unresolvable codes
+        let total = taxa.len() as i64;
+        for (i, taxon) in taxa.iter().enumerate() {
+            emit(app, "species", format!("{} ({}/{})", taxon.com_name, i + 1, total), i as i64, total);
+            let (bird_id, recs) = fetch_species(
+                app, db, &client, &xc_key, &rec_dir, taxon, "",
+                None, None, max_per_species.max(1), i as i64, total,
+            )
+            .await?;
+            recordings_added += recs;
+            match bird_id {
+                Some(id) => {
+                    bird_ids.push(id);
+                    downloaded_new += 1;
+                }
+                None => skipped += 1, // no audio available
+            }
+        }
+    }
+
+    if bird_ids.is_empty() {
+        return Err(anyhow!("No birds from this pack could be imported."));
+    }
+    bird_ids.sort_unstable();
+    bird_ids.dedup();
+
+    let pack_id = crate::services::packs::create_pack_from_birds(db, &name, &bird_ids).await?;
+    emit(app, "done", format!("Imported pack “{}”.", name), 1, 1);
+
+    Ok(crate::models::PackImportResult {
+        pack_id,
+        name,
+        linked_existing,
+        downloaded_new,
+        skipped,
+        recordings_added,
+    })
+}
+
 /// Query Xeno-Canto for a species (by scientific name) and return the raw
 /// recording list. Silent (no progress events) — used by the per-bird
 /// recording browser. Tolerant: returns [] on any request/parse error.

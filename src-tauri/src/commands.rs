@@ -221,6 +221,57 @@ pub async fn add_bird_recordings(
         .map_err(|e| e.to_string())
 }
 
+/// Export a pack to a `birdet-pack` JSON file in the user's Downloads folder.
+/// Returns the absolute path written, for display.
+#[tauri::command]
+pub async fn export_pack(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pack_id: String,
+) -> Result<String, String> {
+    let (name, json) = crate::services::packs::export_pack(&state.db, &pack_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Slugify the pack name for a safe filename.
+    let slug: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let slug = if slug.is_empty() { "pack".to_string() } else { slug };
+    let filename = format!("{}.birdet-pack.json", slug);
+
+    // Prefer the Downloads dir; fall back to app-data/exports if unavailable.
+    let dir = app.path().download_dir().unwrap_or_else(|_| {
+        app.path()
+            .app_data_dir()
+            .map(|d| d.join("exports"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+    });
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(filename);
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Import a pack from the text contents of an exported `birdet-pack` file.
+#[tauri::command]
+pub async fn import_pack(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    contents: String,
+    max_per_species: Option<i64>,
+) -> Result<crate::models::PackImportResult, String> {
+    crate::services::import::import_pack(&app, &state.db, contents, max_per_species.unwrap_or(3))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Manual pack: name + explicit bird selection.
 #[tauri::command]
 pub async fn create_pack(

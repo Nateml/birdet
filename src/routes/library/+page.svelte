@@ -2,9 +2,10 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
-	import { getPacks, getBirds, getBirdPacks, type PackDto, type BirdListItem } from '$lib/api/packs';
+	import { getPacks, getBirds, getBirdPacks, importPack, type PackDto, type BirdListItem } from '$lib/api/packs';
 	import { startSession } from '$lib/stores/session';
 	import { setup } from '$lib/stores/setup';
+	import { onImportProgress } from '$lib/api/import';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 
 	type Tab = 'packs' | 'birds';
@@ -18,6 +19,41 @@
 	let query = $state('');
 
 	const EMOJI = ['🏡', '🌿', '🌊', '🦅', '🐦', '🦉', '🕊️', '🐤'];
+
+	// Pack import (from an exported .birdet-pack.json file).
+	let fileInput = $state<HTMLInputElement | null>(null);
+	let importing = $state(false);
+	let importStatus = $state<string | null>(null);
+
+	async function onPackFile(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = ''; // allow re-selecting the same file later
+		if (!file) return;
+
+		importing = true;
+		error = null;
+		importStatus = 'Reading file…';
+		let unlisten: (() => void) | null = null;
+		try {
+			const text = await file.text();
+			unlisten = await onImportProgress((p) => {
+				if (p.stage === 'species' || p.stage === 'downloading') importStatus = p.message;
+			});
+			const r = await importPack(text);
+			const parts = [`Linked ${r.linked_existing}`];
+			if (r.downloaded_new) parts.push(`downloaded ${r.downloaded_new}`);
+			if (r.skipped) parts.push(`skipped ${r.skipped}`);
+			importStatus = `Imported “${r.name}” — ${parts.join(', ')}.`;
+			goto(`/packs/${r.pack_id}`);
+		} catch (err) {
+			error = (err as string) ?? 'Pack import failed.';
+			importStatus = null;
+		} finally {
+			unlisten?.();
+			importing = false;
+		}
+	}
 
 	onMount(async () => {
 		try {
@@ -65,6 +101,15 @@
 			<p class="text-sm text-be-muted-fg">Your packs and every bird you've collected.</p>
 		</div>
 		<div class="flex shrink-0 gap-2.5">
+			<input bind:this={fileInput} type="file" accept=".json,application/json" class="hidden" onchange={onPackFile} />
+			<button
+				onclick={() => fileInput?.click()}
+				disabled={importing}
+				title="Import a pack from a .birdet-pack.json file"
+				class="rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
+			>
+				{importing ? 'Importing…' : 'Import pack'}
+			</button>
 			<a
 				href="/packs/custom"
 				class="rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary"
@@ -80,6 +125,12 @@
 			</a>
 		</div>
 	</div>
+
+	{#if importStatus}
+		<div class="mb-6 rounded-lg border border-be-border bg-be-card px-4 py-3 text-sm text-be-muted-fg">
+			{#if importing}<span class="font-be-mono">↓ </span>{/if}{importStatus}
+		</div>
+	{/if}
 
 	<div class="mb-6 inline-flex rounded-lg border border-be-border bg-be-card p-1">
 		<button

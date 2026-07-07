@@ -1,8 +1,44 @@
 use crate::db::Db;
-use crate::models::Pack;
+use crate::models::{Pack, PackFile, PackFileBird};
 use anyhow::{anyhow, Result};
 use sqlx::Row;
 use anyhow::Context;
+
+/// Serialize a pack to the portable `birdet-pack` JSON shape. Returns
+/// `(pack_name, pretty_json)`. Only species identity is exported — no audio.
+pub async fn export_pack(db: &Db, pack_id: &str) -> Result<(String, String)> {
+    let name: Option<String> = sqlx::query_scalar("SELECT name FROM packs WHERE id = ?1")
+        .bind(pack_id)
+        .fetch_optional(&db.0)
+        .await?;
+    let name = name.ok_or_else(|| anyhow!("Pack {} not found.", pack_id))?;
+
+    let rows = sqlx::query(
+        r#"SELECT b.ebird_code AS ebird_code, b.common_name AS common_name,
+                  b.scientific_name AS scientific_name
+           FROM birds b
+           JOIN recordings r ON r.bird_id = b.id
+           JOIN pack_recordings pr ON pr.recording_id = r.id AND pr.pack_id = ?1
+           GROUP BY b.id
+           ORDER BY b.common_name"#,
+    )
+    .bind(pack_id)
+    .fetch_all(&db.0)
+    .await?;
+
+    let birds = rows
+        .into_iter()
+        .map(|row| PackFileBird {
+            ebird_code: row.get("ebird_code"),
+            common_name: row.get("common_name"),
+            scientific_name: row.get("scientific_name"),
+        })
+        .collect();
+
+    let file = PackFile { format: "birdet-pack".into(), version: 1, name: name.clone(), birds };
+    let json = serde_json::to_string_pretty(&file)?;
+    Ok((name, json))
+}
 
 /// Build a URL/PK-safe pack id (packs.id is VARCHAR(31)) from a name plus a
 /// millisecond suffix for uniqueness.
