@@ -11,6 +11,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Allow the workflow token to create a Release + upload assets on tag builds.
+permissions:
+  contents: write
+
 jobs:
   windows:
     runs-on: windows-latest
