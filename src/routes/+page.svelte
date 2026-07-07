@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import { getPacks, type PackDto } from '$lib/api/packs';
 	import { getStats, type Stats } from '$lib/api/stats';
 	import { startSession, type StudyMode } from '$lib/stores/session';
@@ -33,7 +34,10 @@
 	});
 
 	// First run: library is empty, so show onboarding instead of the scheduler.
-	const firstRun = $derived(!loading && !!stats && stats.total_birds === 0);
+	// `?onboarding` forces it on for previewing without emptying the library.
+	const firstRun = $derived(
+		page.url.searchParams.has('onboarding') || (!loading && !!stats && stats.total_birds === 0)
+	);
 
 	// Real packs carry no emoji yet — assign a stable one per card.
 	const EMOJI = ['🏡', '🌿', '🌊', '🦅', '🐦', '🦉', '🕊️', '🐤'];
