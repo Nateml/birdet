@@ -1,0 +1,201 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { setup } from '$lib/stores/setup';
+	import AppHeader from '$lib/components/AppHeader.svelte';
+	import { getSetting, setSetting, SETTING_EBIRD_KEY, SETTING_XC_KEY } from '$lib/api/settings';
+	import { backfillRecordingMeta } from '$lib/api/recordings';
+
+	function setLength(v: number) {
+		const length = Math.max(5, Math.min(50, Math.round(v) || 10));
+		setup.update((s) => ({ ...s, length }));
+	}
+
+	// API keys (persisted server-side in the DB settings table).
+	let ebirdKey = $state('');
+	let xcKey = $state('');
+	let savedKey = $state<string | null>(null); // which key just saved (for the ✓)
+
+	onMount(async () => {
+		[ebirdKey, xcKey] = await Promise.all([
+			getSetting(SETTING_EBIRD_KEY),
+			getSetting(SETTING_XC_KEY)
+		]);
+	});
+
+	async function saveKey(key: string, value: string) {
+		await setSetting(key, value.trim());
+		savedKey = key;
+		setTimeout(() => (savedKey === key ? (savedKey = null) : null), 1500);
+	}
+
+	// Back-fill quality/type on recordings imported before those fields existed.
+	let backfilling = $state(false);
+	let backfillMsg = $state<string | null>(null);
+	async function runBackfill() {
+		if (backfilling) return;
+		backfilling = true;
+		backfillMsg = null;
+		try {
+			const n = await backfillRecordingMeta();
+			backfillMsg = n > 0 ? `Updated ${n} recording${n > 1 ? 's' : ''}.` : 'All recordings already up to date.';
+		} catch (e) {
+			backfillMsg = (e as string) ?? 'Backfill failed.';
+		} finally {
+			backfilling = false;
+		}
+	}
+</script>
+
+<AppHeader />
+
+<main class="mx-auto max-w-2xl px-8 py-10">
+	<div class="mb-8">
+		<h2 class="font-be-serif mb-2 text-3xl font-bold leading-tight">Settings</h2>
+		<p class="text-sm text-be-muted-fg">Defaults applied to every new session.</p>
+	</div>
+
+	<!-- Session defaults -->
+	<div class="mb-6 rounded-xl border border-be-border bg-be-card p-6">
+		<p class="font-be-mono mb-4 text-xs uppercase tracking-widest text-be-muted-fg">
+			Session defaults
+		</p>
+
+		<label class="flex items-center justify-between gap-4 py-2">
+			<span>
+				<span class="block text-sm font-medium">New birds per session</span>
+				<span class="block text-xs text-be-muted-fg">
+					New species introduced before the session switches to reviews. 5–50.
+				</span>
+			</span>
+			<input
+				type="number"
+				min="5"
+				max="50"
+				value={$setup.length}
+				oninput={(e) => setLength(+e.currentTarget.value)}
+				class="w-20 rounded-lg border border-be-border bg-be-bg px-3 py-1.5 text-right text-sm text-be-fg outline-none focus:border-be-primary/40"
+			/>
+		</label>
+
+		<label class="mt-4 flex items-center justify-between gap-4 border-t border-be-border pt-4">
+			<span>
+				<span class="block text-sm font-medium">Auto-play call</span>
+				<span class="block text-xs text-be-muted-fg">Play each call automatically when it loads.</span>
+			</span>
+			<button
+				type="button"
+				role="switch"
+				aria-label="Auto-play call"
+				aria-checked={$setup.autoplay}
+				onclick={() => setup.update((s) => ({ ...s, autoplay: !s.autoplay }))}
+				class="relative h-6 w-11 shrink-0 rounded-full transition-colors {$setup.autoplay
+					? 'bg-be-primary'
+					: 'bg-be-muted'}"
+			>
+				<span
+					class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all {$setup.autoplay
+						? 'left-[22px]'
+						: 'left-0.5'}"
+				></span>
+			</button>
+		</label>
+
+		<div class="mt-4 border-t border-be-border pt-4">
+			<span class="mb-2 block text-sm font-medium">Answer mode</span>
+			<div class="grid grid-cols-2 gap-2">
+				<button
+					onclick={() => setup.update((s) => ({ ...s, mode: 'multiple' }))}
+					class="rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors"
+					class:border-be-primary={$setup.mode === 'multiple'}
+					class:bg-be-secondary={$setup.mode === 'multiple'}
+					class:text-be-primary={$setup.mode === 'multiple'}
+					class:border-be-border={$setup.mode !== 'multiple'}
+				>
+					Multiple choice
+				</button>
+				<button
+					disabled
+					class="flex items-center justify-center gap-2 rounded-lg border border-be-border px-4 py-2.5 text-sm font-semibold text-be-muted-fg opacity-60"
+					title="Coming soon"
+				>
+					Type the name
+					<span class="font-be-mono rounded bg-be-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wider">soon</span>
+				</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- API keys (for importing birds) -->
+	<div class="mb-6 rounded-xl border border-be-border bg-be-card p-6">
+		<p class="font-be-mono mb-1 text-xs uppercase tracking-widest text-be-muted-fg">API keys</p>
+		<p class="mb-4 text-xs text-be-muted-fg">
+			Needed to import birds. Both are free — grab a token from your account on each site.
+		</p>
+
+		<label class="block">
+			<span class="mb-1.5 flex items-center gap-2 text-sm font-medium">
+				eBird API token
+				{#if savedKey === SETTING_EBIRD_KEY}<span class="text-xs text-be-primary">saved ✓</span>{/if}
+			</span>
+			<input
+				type="password"
+				bind:value={ebirdKey}
+				onblur={() => saveKey(SETTING_EBIRD_KEY, ebirdKey)}
+				placeholder="from ebird.org/api/keygen"
+				autocomplete="off"
+				class="w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40"
+			/>
+		</label>
+
+		<label class="mt-4 block">
+			<span class="mb-1.5 flex items-center gap-2 text-sm font-medium">
+				Xeno-Canto API key
+				{#if savedKey === SETTING_XC_KEY}<span class="text-xs text-be-primary">saved ✓</span>{/if}
+			</span>
+			<input
+				type="password"
+				bind:value={xcKey}
+				onblur={() => saveKey(SETTING_XC_KEY, xcKey)}
+				placeholder="from xeno-canto.org account (API v3)"
+				autocomplete="off"
+				class="w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40"
+			/>
+		</label>
+		<div class="mt-4 border-t border-be-border pt-4">
+			<div class="flex items-center justify-between gap-4">
+				<span>
+					<span class="block text-sm font-medium">Back-fill recording metadata</span>
+					<span class="block text-xs text-be-muted-fg">
+						Fetch quality &amp; type from Xeno-Canto for older recordings missing them.
+					</span>
+				</span>
+				<button
+					onclick={runBackfill}
+					disabled={backfilling}
+					class="shrink-0 rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
+				>
+					{backfilling ? 'Fetching…' : 'Back-fill'}
+				</button>
+			</div>
+			{#if backfillMsg}
+				<p class="mt-2 text-xs text-be-muted-fg">{backfillMsg}</p>
+			{/if}
+		</div>
+	</div>
+
+	<!-- About -->
+	<div class="rounded-xl border border-be-border bg-be-card p-6">
+		<p class="font-be-mono mb-3 text-xs uppercase tracking-widest text-be-muted-fg">About</p>
+		<div class="flex items-center gap-3">
+			<div
+				class="flex h-10 w-10 items-center justify-center rounded-lg border border-be-primary/20 bg-be-primary/10 text-xl"
+			>
+				🐦
+			</div>
+			<div>
+				<p class="font-be-serif font-semibold">Birdet</p>
+				<p class="text-xs text-be-muted-fg">Learn bird calls by ear.</p>
+			</div>
+		</div>
+	</div>
+</main>
