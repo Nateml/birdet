@@ -61,7 +61,7 @@
 </script>
 
 
-<main class="mx-auto max-w-3xl px-8 py-10">
+<main class="mx-auto max-w-5xl px-10 py-10">
 	<div class="mb-8">
 		<h2 class="font-be-serif mb-2 text-3xl font-bold leading-tight">Your Progress</h2>
 		<p class="text-sm text-be-muted-fg">How well the flock is settling into long-term memory.</p>
@@ -148,7 +148,7 @@
 
 		<!-- Per-species -->
 		<p class="font-be-mono mb-3 text-xs uppercase tracking-widest text-be-muted-fg">By species</p>
-		<div class="space-y-2">
+		<div class="grid grid-cols-1 gap-2 lg:grid-cols-2">
 			{#each stats.birds as b (b.common_name)}
 				{@const p = pct(b.correct, b.seen)}
 				<div

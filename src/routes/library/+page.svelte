@@ -89,7 +89,7 @@
 </script>
 
 
-<main class="mx-auto max-w-3xl px-8 py-10">
+<main class="mx-auto max-w-[1400px] px-10 py-10">
 	<div class="mb-6 flex items-end justify-between gap-4">
 		<div>
 			<h2 class="font-be-serif mb-2 text-3xl font-bold leading-tight">Library</h2>
@@ -152,29 +152,31 @@
 		{#if packs.length === 0}
 			<p class="text-sm text-be-muted-fg">No packs yet.</p>
 		{:else}
-			<div class="divide-y divide-be-border overflow-hidden rounded-xl border border-be-border bg-be-card">
+			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
 				{#each packs as p, i (p.id)}
-					<div class="flex items-center gap-4 px-5 py-4">
-						<span class="text-2xl leading-none">{EMOJI[i % EMOJI.length]}</span>
-						<div class="min-w-0 flex-1">
-							<h3 class="font-be-serif font-semibold leading-snug">{p.name}</h3>
-							{#if p.description}
-								<p class="truncate text-sm text-be-muted-fg">{p.description}</p>
-							{/if}
+					<div class="flex flex-col rounded-xl border border-be-border bg-be-card p-5">
+						<div class="mb-3 flex items-start justify-between gap-3">
+							<span class="text-2xl leading-none">{EMOJI[i % EMOJI.length]}</span>
+							<span class="font-be-mono text-xs text-be-muted-fg">{p.bird_count} species</span>
 						</div>
-						<span class="font-be-mono shrink-0 text-xs text-be-muted-fg">{p.bird_count} species</span>
-						<a
-							href="/packs/{p.id}"
-							class="shrink-0 rounded-lg border border-be-border px-3 py-1.5 text-sm transition-colors hover:bg-be-secondary"
-						>
-							Edit
-						</a>
-						<button
-							onclick={() => train(p.id)}
-							class="shrink-0 rounded-lg border border-be-border px-3 py-1.5 text-sm font-semibold transition-colors hover:border-be-primary/40 hover:text-be-primary"
-						>
-							Train
-						</button>
+						<h3 class="font-be-serif font-semibold leading-snug">{p.name}</h3>
+						{#if p.description}
+							<p class="mt-0.5 line-clamp-2 text-sm text-be-muted-fg">{p.description}</p>
+						{/if}
+						<div class="mt-4 flex gap-2">
+							<a
+								href="/packs/{p.id}"
+								class="flex-1 rounded-lg border border-be-border px-3 py-1.5 text-center text-sm transition-colors hover:bg-be-secondary"
+							>
+								Edit
+							</a>
+							<button
+								onclick={() => train(p.id)}
+								class="flex-1 rounded-lg border border-be-border px-3 py-1.5 text-sm font-semibold transition-colors hover:border-be-primary/40 hover:text-be-primary"
+							>
+								Train
+							</button>
+						</div>
 					</div>
 				{/each}
 			</div>
@@ -183,17 +185,22 @@
 		<p class="text-sm text-be-muted-fg">No birds yet — <a href="/import" class="text-be-primary underline">import some</a>.</p>
 	{:else}
 		<input bind:value={query} placeholder="search birds…"
-			class="mb-4 w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40" />
-		<div class="divide-y divide-be-border overflow-hidden rounded-xl border border-be-border bg-be-card">
-			{#each filteredBirds as b (b.id)}
-				<div class="flex items-center gap-4 px-5 py-3">
-					<div class="min-w-0 flex-1">
+			class="mb-4 w-full max-w-md rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40" />
+		{#if filteredBirds.length === 0}
+			<p class="text-sm text-be-muted-fg">No birds match “{query}”.</p>
+		{:else}
+			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+				{#each filteredBirds as b (b.id)}
+					<div class="flex flex-col rounded-xl border border-be-border bg-be-card p-4">
 						<a href="/birds/{b.id}" class="group block">
-							<h3 class="truncate font-medium leading-snug group-hover:text-be-primary">{b.common_name}</h3>
+							<div class="flex items-start justify-between gap-2">
+								<h3 class="truncate font-medium leading-snug group-hover:text-be-primary">{b.common_name}</h3>
+								<span class="font-be-mono shrink-0 text-xs text-be-muted-fg">{b.recording_count}♪</span>
+							</div>
 							<p class="truncate text-xs italic text-be-muted-fg">{b.scientific_name}{#if b.family} · {b.family}{/if}</p>
 						</a>
 						{#if birdPacks.get(b.id)?.length}
-							<div class="mt-1.5 flex flex-wrap gap-1">
+							<div class="mt-2.5 flex flex-wrap gap-1">
 								{#each birdPacks.get(b.id) ?? [] as pk (pk.id)}
 									<a href="/packs/{pk.id}"
 										class="rounded-full border border-be-border bg-be-secondary/50 px-2 py-0.5 text-[11px] leading-none text-be-muted-fg transition-colors hover:border-be-primary/40 hover:text-be-fg">{pk.name}</a>
@@ -201,12 +208,8 @@
 							</div>
 						{/if}
 					</div>
-					<a href="/birds/{b.id}" class="font-be-mono shrink-0 text-xs text-be-muted-fg transition-colors hover:text-be-fg">{b.recording_count}♪</a>
-				</div>
-			{/each}
-			{#if filteredBirds.length === 0}
-				<p class="px-5 py-4 text-sm text-be-muted-fg">No birds match “{query}”.</p>
-			{/if}
-		</div>
+				{/each}
+			</div>
+		{/if}
 	{/if}
 </main>
