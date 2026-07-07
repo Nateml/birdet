@@ -13,6 +13,12 @@
 
     onMount(initTheme);
 
+    // Dev-only zoom: WSLg renders the webview small, so bump it while developing.
+    // `import.meta.env.DEV` is false in production builds, so this never ships.
+    onMount(() => {
+        if (import.meta.env.DEV) document.documentElement.style.zoom = '1.3';
+    });
+
     // F11 toggles OS fullscreen (hides the window title bar); Esc leaves it.
     // Tauri-only — guarded so `pnpm dev` in a plain browser is a no-op.
     async function toggleFullscreen(force?: boolean) {
