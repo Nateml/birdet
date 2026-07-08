@@ -36,13 +36,18 @@ pub async fn get_next_question(
         .map_err(|e| e.to_string())
 }
 
-/// Eligible cards remaining in the current session's queue, by bucket. Lets the
-/// UI show a live "N left" so the drain phase isn't an invisible open-ended pile.
+/// A snapshot of the session's remaining work, for the live progress readout.
+/// `to_go` is the headline number: the minimum questions left if every answer is
+/// correct (a new bird needs 2 passes, a learning card its remaining steps, a due
+/// review 1). It drops by one per correct answer and rises on a miss — unlike a
+/// raw card count, which sits still while a new bird just shifts to learning.
+/// `new`/`learning`/`due` are card counts kept for the breakdown tooltip.
 #[derive(Serialize)]
 pub struct QueueCounts {
     pub new: i64,      // new birds still to introduce (capped by remaining budget)
-    pub learning: i64, // learning/review cards due within the learn-ahead window
-    pub due: i64,      // review cards due now
+    pub learning: i64, // learning cards being drilled
+    pub due: i64,      // review cards due within the learn-ahead window
+    pub to_go: i64,    // min questions to finish if all correct
 }
 
 /// Count the cards `get_next_question` would still serve, with the same scoping.

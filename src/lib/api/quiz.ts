@@ -30,11 +30,13 @@ export async function getNextQuestion(
     });
 }
 
-// Mirrors Rust `commands::QueueCounts` — eligible cards left in the session.
+// Mirrors Rust `commands::QueueCounts`. `to_go` is the headline number (min
+// questions to finish if all correct); new/learning/due back the breakdown.
 export type QueueCounts = {
     new: number;
     learning: number;
     due: number;
+    to_go: number;
 };
 
 export async function getQueueCounts(

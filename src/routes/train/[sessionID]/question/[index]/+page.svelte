@@ -5,7 +5,7 @@
 	import { get } from 'svelte/store';
 	import { session, loadQuestion, answerCurrent, continueTraining } from '$lib/stores/session';
 	import { setup } from '$lib/stores/setup';
-	import { getRecordingBlobUrl } from '$lib/api/audio';
+	import { getRecordingAudio } from '$lib/api/audio';
 	import { buildSpectrogramBitmap, drawSpectrogramFrame, type Spectrogram } from '$lib/spectrogram';
 	import SpectroWorker from '$lib/spectrogram.worker?worker';
 	import type { QuestionDto } from '$lib/api/quiz';
@@ -52,7 +52,8 @@
 	// card on screen, so it counts down to 0 as the queue empties — giving a clear
 	// sense of when the session ends. Null for cram (fixed length) / before counted.
 	const remaining = $derived($session?.remaining ?? null);
-	const cardsLeft = $derived(remaining ? remaining.new + remaining.learning + remaining.due : null);
+	// Min questions to finish if all correct (drops per correct answer, rises on a miss).
+	const toGo = $derived(remaining?.to_go ?? null);
 	// Study-ahead mode (user kept training past the scheduled queue).
 	const extended = $derived($session?.extended ?? false);
 	// The progress bar is meaningful only when there's a known target: the
@@ -256,17 +257,16 @@
 		});
 	}
 
-	async function decodeAudio(url: string, gen: number) {
-		const ab = await (await fetch(url)).arrayBuffer();
-		// Throwaway context just for decoding — close it so it doesn't hold the
-		// audio sink (which mutes the <audio> element on WSL/PulseAudio).
-		const ctx = new AudioContext();
-		let buf: AudioBuffer;
-		try {
-			buf = await ctx.decodeAudioData(ab);
-		} finally {
-			ctx.close();
-		}
+	async function decodeAudio(ab: ArrayBuffer, gen: number) {
+		// Decode with an OfflineAudioContext, NOT a real AudioContext: a real
+		// context grabs the audio device/sink, which on WSL/PulseAudio disrupts
+		// the <audio> element (it fails to load with "operation not supported",
+		// worst for longer clips whose decode holds the sink longer). Offline
+		// rendering never touches the device, so playback and analysis coexist.
+		const OfflineCtx =
+			window.OfflineAudioContext ?? (window as unknown as { webkitOfflineAudioContext: typeof OfflineAudioContext }).webkitOfflineAudioContext;
+		const ctx = new OfflineCtx(1, 1, 48000);
+		const buf: AudioBuffer = await ctx.decodeAudioData(ab);
 		durationMs = buf.duration * 1000;
 		// Copy channel data (transferring detaches it from the AudioBuffer).
 		const samples = new Float32Array(buf.getChannelData(0));
@@ -310,6 +310,7 @@
 		error = null;
 		qNum = $session.index + 1;
 		const gen = ++loadGen;
+		let audioBuf: ArrayBuffer | null = null;
 		try {
 			const q = await loadQuestion();
 			if (gen !== loadGen) return;
@@ -325,7 +326,12 @@
 				return;
 			}
 			question = q;
-			audioUrl = await getRecordingBlobUrl(q.recording_id);
+			// One read: blob URL for the <audio> element + buffer for the
+			// spectrogram. Fetching the blob URL a second time to decode it breaks
+			// webkit's media element (silent playback), so reuse this buffer.
+			const audio = await getRecordingAudio(q.recording_id);
+			audioUrl = audio.url;
+			audioBuf = audio.buffer;
 			if (gen !== loadGen) return;
 		} catch (e) {
 			error = (e as Error)?.message ?? 'Failed to load question.';
@@ -336,8 +342,8 @@
 		// immediately; the spectrogram fills in when the worker finishes. If it
 		// fails, playback still works via the <audio> element — just flag it so
 		// the "analyzing…" state clears instead of hanging with a 0:00 clip.
-		if (audioUrl)
-			decodeAudio(audioUrl, gen).catch(() => {
+		if (audioBuf)
+			decodeAudio(audioBuf, gen).catch(() => {
 				if (gen === loadGen) specFailed = true;
 			});
 	}
@@ -532,12 +538,12 @@
 				<span class="font-be-mono rounded-full bg-be-secondary px-2.5 py-1 text-xs text-be-secondary-fg" title="Studying ahead — practising cards before they're due. No effect beyond normal scheduling.">
 					study ahead
 				</span>
-			{:else if cardsLeft !== null}
+			{:else if toGo !== null}
 				<span
 					class="font-be-mono rounded-full bg-be-muted px-2.5 py-1 text-xs text-be-muted-fg"
-					title="Cards left this session: {remaining?.new} new · {remaining?.learning} learning · {remaining?.due} due. Learning cards keep coming back until answered correctly."
+					title="≈{toGo} questions to finish if you get them all right ({remaining?.new} new · {remaining?.learning} learning · {remaining?.due} due). Rises when you miss one."
 				>
-					{cardsLeft} left
+					{toGo} to go
 				</span>
 			{/if}
 		{/if}
