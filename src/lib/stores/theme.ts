@@ -1,18 +1,32 @@
 import { writable } from 'svelte/store';
 
-export const theme = writable('lemonade');
+export type ThemeMode = 'light' | 'dark';
+
+// The main app is themed via the `be-*` design tokens, which are overridden
+// under `[data-theme='light']` in app.css. DaisyUI (legacy fallback screens)
+// also has `light`/`dark` themes, so the one attribute drives both.
+export const theme = writable<ThemeMode>('dark');
+
+function apply(mode: ThemeMode) {
+    document.documentElement.setAttribute('data-theme', mode);
+    document.documentElement.style.colorScheme = mode;
+}
 
 export function initTheme() {
     if (typeof window === 'undefined') return;
-    const saved = localStorage.getItem('theme');
-    if (saved) {
-        document.documentElement.setAttribute('data-theme', saved);
-        theme.set(saved);
-    }
+    const mode: ThemeMode = localStorage.getItem('theme') === 'light' ? 'light' : 'dark';
+    apply(mode);
+    theme.set(mode);
 }
 
-export function setTheme(newTheme: string) {
-    document.documentElement.setAttribute('data-theme', newTheme);
-    localStorage.setItem('theme', newTheme);
-    theme.set(newTheme);
+export function setTheme(mode: ThemeMode) {
+    apply(mode);
+    localStorage.setItem('theme', mode);
+    theme.set(mode);
+}
+
+export function toggleTheme() {
+    let next: ThemeMode = 'dark';
+    theme.update((m) => (next = m === 'dark' ? 'light' : 'dark'));
+    setTheme(next);
 }

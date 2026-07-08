@@ -4,7 +4,6 @@
     import { initTheme } from '$lib/stores/theme';
     import { onMount } from 'svelte';
     import { page } from '$app/state';
-    import ThemeSwitcher from '$lib/components/ThemeSwitcher.svelte';
     import ImportIndicator from '$lib/components/ImportIndicator.svelte';
     import Sidebar from '$lib/components/Sidebar.svelte';
     import CommandPalette from '$lib/components/CommandPalette.svelte';
@@ -51,16 +50,11 @@
     });
 
     const path = $derived(page.url.pathname);
-    const onHome = $derived(path === '/');
-    const onTrain = $derived(path === '/train');
-    const onLibrary = $derived(path === '/library');
-    const onStats = $derived(path === '/stats');
-    const onSettings = $derived(path === '/settings');
 
     // Three chrome modes:
     //   training  — in-session screens render chromeless (own focused header)
     //   app shell — sidebar + scrollable content pane (the BirdEar screens)
-    //   fallback  — legacy DaisyUI pages (train index, dashboard, species)
+    //   fallback  — chromeless themed shell (e.g. the /train redirect stub)
     const isTraining = $derived(path.startsWith('/train/') && path !== '/train');
     const appScreens = ['/', '/library', '/stats', '/settings', '/import', '/guide'];
     const isApp = $derived(
@@ -88,34 +82,8 @@
         </div>
     </div>
 {:else}
-    <div class="flex h-dvh flex-col overflow-hidden">
-        <header class="border-b">
-            <div class="navbar container mx-auto">
-                <div class="navbar-start">
-                    <a href="/" class="text-lg font-semibold">Birdet</a>
-                </div>
-
-                <div class="navbar-center hidden md:flex">
-                    <ul class="menu menu-horizontal px-1 gap-2">
-                        <li><a href="/" class:active={onHome}>Home</a></li>
-                        <li><a href="/train" class:active={onTrain}>Train</a></li>
-                        <li><a href="/library" class:active={onLibrary}>Library</a></li>
-                        <li><a href="/stats" class:active={onStats}>Stats</a></li>
-                        <li><a href="/settings" class:active={onSettings}>Settings</a></li>
-                    </ul>
-                </div>
-
-                <div class="navbar-end">
-                    <ThemeSwitcher value="night" />
-                </div>
-            </div>
-        </header>
-
-        <main class="flex-1 overflow-y-auto">
-            <div class="container mx-auto py-6 px-4">
-                {@render children()}
-            </div>
-        </main>
+    <div class="h-dvh overflow-y-auto bg-be-bg text-be-fg font-be-sans">
+        {@render children()}
     </div>
 {/if}
 

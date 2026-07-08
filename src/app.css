@@ -1,7 +1,4 @@
 @import 'tailwindcss';
-@plugin 'daisyui' {
-    themes: light, dark, forest, lemonade --default, night --prefersdark;
-}
 
 /* ── BirdEar design fonts (bundled locally; CSP blocks Google CDN) ── */
 @font-face {
@@ -102,6 +99,29 @@
   --font-be-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
+/* ── Light mode ── overrides the `be-*` tokens when the user picks light.
+   Utilities reference these vars at use-site, so switching the attribute
+   re-themes the whole app live. Driven by the theme store / Sidebar toggle. */
+:root[data-theme='light'] {
+  --color-be-bg: #f3f6ef;
+  --color-be-fg: #14210f;
+  --color-be-card: #ffffff;
+  --color-be-card-fg: #14210f;
+  --color-be-primary: #1f9d4d;
+  --color-be-primary-fg: #ffffff;
+  --color-be-secondary: #e3efdc;
+  --color-be-secondary-fg: #2f5e2a;
+  --color-be-muted: #eaf1e5;
+  --color-be-muted-fg: #5c7355;
+  --color-be-accent: #b5790a;
+  --color-be-accent-fg: #ffffff;
+  --color-be-destructive: #cf3b3b;
+  --color-be-destructive-fg: #ffffff;
+  --color-be-border: rgba(20, 33, 15, 0.12);
+  --color-be-input: rgba(20, 33, 15, 0.05);
+  --color-be-ring: rgba(31, 157, 77, 0.4);
+}
+
 html, body {
     height: 100%;
     margin: 0;
@@ -111,6 +131,7 @@ html, body {
 }
 
 html {
+    /* Overridden inline by the theme store (initTheme / setTheme). */
     color-scheme: dark;
 }
 
