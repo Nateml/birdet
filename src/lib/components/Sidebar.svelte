@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { theme, toggleTheme } from '$lib/stores/theme';
+	import logo from '$lib/assets/logo.svg';
 
 	const path = $derived(page.url.pathname);
 
@@ -43,9 +44,7 @@
 <aside class="flex h-dvh w-56 shrink-0 flex-col border-r border-be-border bg-be-card">
 	<!-- brand -->
 	<a href="/" class="flex items-center gap-3 px-5 pt-6 pb-5">
-		<div class="flex h-9 w-9 items-center justify-center rounded-lg border border-be-primary/20 bg-be-primary/10 text-lg">
-			🐦
-		</div>
+		<img src={logo} alt="Birdet" class="h-9 w-9" />
 		<div>
 			<h1 class="font-be-serif text-lg font-bold leading-none">Birdet</h1>
 			<p class="font-be-mono mt-0.5 text-[10px] text-be-muted-fg">by ear</p>

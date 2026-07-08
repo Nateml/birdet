@@ -3,6 +3,7 @@
 	import { setup } from '$lib/stores/setup';
 	import { getSetting, setSetting, SETTING_EBIRD_KEY, SETTING_XC_KEY } from '$lib/api/settings';
 	import { backfillRecordingMeta, repairRecordings } from '$lib/api/recordings';
+	import logo from '$lib/assets/logo.svg';
 
 	function setLength(v: number) {
 		const length = Math.max(5, Math.min(50, Math.round(v) || 10));
@@ -250,11 +251,7 @@
 	<div class="rounded-xl border border-be-border bg-be-card p-6">
 		<p class="font-be-mono mb-3 text-xs uppercase tracking-widest text-be-muted-fg">About</p>
 		<div class="flex items-center gap-3">
-			<div
-				class="flex h-10 w-10 items-center justify-center rounded-lg border border-be-primary/20 bg-be-primary/10 text-xl"
-			>
-				🐦
-			</div>
+			<img src={logo} alt="Birdet" class="h-10 w-10" />
 			<div>
 				<p class="font-be-serif font-semibold">Birdet</p>
 				<p class="text-xs text-be-muted-fg">Learn bird calls by ear.</p>
