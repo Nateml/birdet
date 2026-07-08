@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { tick } from 'svelte';
 	import { getBirds, type BirdListItem } from '$lib/api/packs';
 	import { getRecordingBlobUrl } from '$lib/api/audio';
 	import {
@@ -17,12 +18,16 @@
 		birdId,
 		standalone = false,
 		onChanged,
-		onDeleted
+		onDeleted,
+		highlightRecordingId,
+		backHref
 	}: {
 		birdId: number;
 		standalone?: boolean;
 		onChanged?: () => void;
 		onDeleted?: () => void;
+		highlightRecordingId?: number;
+		backHref?: string;
 	} = $props();
 
 	let bird = $state<BirdListItem | null>(null);
@@ -54,6 +59,27 @@
 			loadedId = birdId;
 			void reload();
 		}
+	});
+
+	// When deep-linked with a recording id (e.g. from the quiz), scroll it into
+	// view and flash it once the list has loaded, so the user lands on the exact
+	// recording they wanted to replace.
+	let flashId = $state<number | null>(null);
+	let flashedFor: number | null = null; // guard: auto-scroll each target once
+	$effect(() => {
+		const target = highlightRecordingId;
+		if (!target || loading || flashedFor === target) return;
+		if (!recordings.some((r) => r.id === target)) return;
+		flashedFor = target;
+		flashId = target;
+		void tick().then(() =>
+			document
+				.getElementById(`rec-${target}`)
+				?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+		);
+		setTimeout(() => {
+			if (flashId === target) flashId = null;
+		}, 2600);
 	});
 
 	function stopPlayback() {
@@ -186,7 +212,12 @@
 <audio bind:this={audioEl} onended={() => (playingId = null)} class="hidden"></audio>
 
 <div class={standalone ? 'mx-auto max-w-2xl px-8 py-10' : 'px-8 py-8'}>
-	{#if standalone}
+	{#if backHref}
+		<a href={backHref} class="mb-4 inline-flex items-center gap-1 text-sm text-be-primary transition-colors hover:underline">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+			Back to training
+		</a>
+	{:else if standalone}
 		<a href="/library" class="mb-4 inline-flex items-center gap-1 text-sm text-be-muted-fg transition-colors hover:text-be-fg">
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
 			Library
@@ -291,7 +322,12 @@
 		{:else}
 			<div class="divide-y divide-be-border overflow-hidden rounded-xl border border-be-border bg-be-card">
 				{#each recordings as r (r.id)}
-					<div class="flex items-center gap-3 px-4 py-3">
+					<div
+						id="rec-{r.id}"
+						class="flex items-center gap-3 px-4 py-3 transition-colors duration-500 {flashId === r.id
+							? 'bg-be-primary/10'
+							: ''}"
+					>
 						<button onclick={() => play(r.id)} title={playingId === r.id ? 'Pause' : 'Play'}
 							class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-be-border text-be-fg transition-colors hover:border-be-primary/40 hover:text-be-primary">
 							{#if playingId === r.id}

@@ -385,6 +385,19 @@
 		else goto(`/train/${id}/question/${$session.index}`);
 	}
 
+	// Jump to this recording on its bird's page (to replace/delete a bad one).
+	// Only reachable after answering, so it doesn't spoil the identity.
+	function manageRecording() {
+		if (!question) return;
+		try {
+			audioEl?.pause();
+		} catch {
+			/* noop */
+		}
+		const back = encodeURIComponent(page.url.pathname);
+		goto(`/birds/${question.bird_id}?rec=${question.recording_id}&return=${back}`);
+	}
+
 	function exit() {
 		try {
 			audioEl?.pause();
@@ -593,6 +606,16 @@
 				>
 					Next Bird
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+				</button>
+			</div>
+			<!-- Escape hatch: the recording was bad — go straight to it to replace it. -->
+			<div class="mt-4 text-center">
+				<button
+					onclick={manageRecording}
+					class="font-be-mono inline-flex items-center gap-1.5 text-xs text-be-muted-fg transition-colors hover:text-be-fg"
+				>
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+					Bad recording? Go manage it
 				</button>
 			</div>
 		{/if}
