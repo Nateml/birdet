@@ -61,6 +61,16 @@ pub async fn submit_answer(state: State<'_, AppState>, payload: AnswerPayload) -
 /// Imported recordings download to `app_data_dir/recordings/`; the original seed
 /// audio ships read-only under `BaseDirectory::Resource`.
 pub fn resolve_recording(app: &AppHandle, filename: &str) -> Result<std::path::PathBuf, String> {
+    // `filename` is stored per-recording and may predate sanitization. Reject
+    // anything that isn't a plain leaf name so it can't escape the recordings
+    // dir (path traversal → arbitrary file read via the asset protocol).
+    if filename.is_empty()
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.contains("..")
+    {
+        return Err("invalid recording filename".into());
+    }
     if let Ok(dir) = app.path().app_data_dir() {
         let imported = dir.join("recordings").join(filename);
         if imported.exists() {

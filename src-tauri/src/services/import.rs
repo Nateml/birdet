@@ -11,6 +11,35 @@ use tauri::{AppHandle, Emitter, Manager};
 const EBIRD_BASE: &str = "https://api.ebird.org/v2";
 const XC_BASE: &str = "https://xeno-canto.org/api/3/recordings";
 
+/// Cap on a single downloaded recording. XC files are a few MB; this only
+/// exists to stop a malicious pack/URL from exhausting memory or disk.
+const MAX_RECORDING_BYTES: u64 = 60 * 1024 * 1024;
+
+/// Build a filesystem-safe recording filename from an *untrusted* Xeno-Canto id.
+/// `id` and `file_name` come from remote JSON or a shared `.birdet` pack file,
+/// so an attacker could set `id` to `../../…` and escape the recordings dir on
+/// import (arbitrary file write) or later reads. Strip the id to a safe
+/// character set and whitelist the extension so the result is always a plain
+/// leaf name under `recordings/`.
+fn recording_file_name(id: &str, file_name: &str) -> String {
+    let safe_id: String = id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    let safe_id = if safe_id.is_empty() {
+        "unknown".to_string()
+    } else {
+        safe_id
+    };
+    let ext = file_name
+        .rsplit('.')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .filter(|e| matches!(e.as_str(), "mp3" | "wav" | "ogg" | "flac" | "m4a" | "mpga" | "aac"))
+        .unwrap_or_else(|| "mp3".to_string());
+    format!("xc_{}.{}", safe_id, ext)
+}
+
 // --- Import parameters (from the UI) ------------------------------------
 #[derive(Deserialize, Debug, Clone)]
 pub struct ImportParams {
@@ -560,13 +589,7 @@ pub async fn add_recordings(
         } else {
             r.file.clone()
         };
-        let ext = r
-            .file_name
-            .rsplit('.')
-            .next()
-            .filter(|e| e.len() <= 4 && !e.is_empty())
-            .unwrap_or("mp3");
-        let filename = format!("xc_{}.{}", r.id, ext);
+        let filename = recording_file_name(&r.id, &r.file_name);
         if download_to(&client, &xc_key, &file_url, &rec_dir.join(&filename)).await.is_ok() {
             insert_recording(db, bird_id, &filename, r).await?;
             added += 1;
@@ -856,13 +879,7 @@ async fn fetch_species(
         } else {
             r.file.clone()
         };
-        let ext = r
-            .file_name
-            .rsplit('.')
-            .next()
-            .filter(|e| e.len() <= 4 && !e.is_empty())
-            .unwrap_or("mp3");
-        let filename = format!("xc_{}.{}", r.id, ext);
+        let filename = recording_file_name(&r.id, &r.file_name);
         emit(app, "downloading", format!("↓ {} — XC{}", taxon.com_name, r.id), idx, total);
 
         match download_to(client, xc_key, &file_url, &rec_dir.join(&filename)).await {
@@ -887,15 +904,25 @@ async fn download_to(
     dest: &std::path::Path,
 ) -> Result<()> {
     let sep = if url.contains('?') { '&' } else { '?' };
-    let bytes = client
+    let resp = client
         .get(format!("{}{}key={}", url, sep, enc(xc_key)))
         .send()
         .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
+        .error_for_status()?;
+    // Reject an oversized download before buffering it: a malicious pack/URL
+    // could otherwise exhaust memory or fill the disk. XC recordings are small.
+    if let Some(len) = resp.content_length() {
+        if len > MAX_RECORDING_BYTES {
+            return Err(anyhow!("recording too large ({} bytes)", len));
+        }
+    }
+    let bytes = resp.bytes().await?;
     if bytes.is_empty() {
         return Err(anyhow!("empty file"));
+    }
+    // Guard against a server that lied about (or omitted) Content-Length.
+    if bytes.len() as u64 > MAX_RECORDING_BYTES {
+        return Err(anyhow!("recording too large ({} bytes)", bytes.len()));
     }
     std::fs::write(dest, &bytes)?;
     Ok(())

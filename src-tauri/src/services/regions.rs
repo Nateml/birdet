@@ -45,7 +45,11 @@ pub(crate) fn enc(s: &str) -> String {
 }
 
 pub fn build_client() -> Result<reqwest::Client> {
-    Ok(reqwest::Client::builder().user_agent("birdet/0.1").build()?)
+    Ok(reqwest::Client::builder()
+        .user_agent("birdet/0.1")
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(120))
+        .build()?)
 }
 
 pub async fn ebird_key(db: &Db) -> Result<String> {
