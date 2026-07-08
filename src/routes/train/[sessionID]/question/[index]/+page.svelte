@@ -68,8 +68,14 @@
 	let playStart = 0; // performance.now() reference for pos 0
 	let posMs = $state(0); // current playback position
 	let durationMs = $state(0);
-	let ready = $state(false); // spectrogram computed, playback allowed
+	let ready = $state(false); // spectrogram computed
+	let audioReady = $state(false); // <audio> has usable metadata
+	let specFailed = $state(false); // spectrogram decode failed (playback still works)
 	let audioErr = $state(''); // surfaced playback error, if any
+	// Playback is allowed as soon as *either* the spectrogram is ready or the
+	// <audio> element has metadata. Decoupling them means a file the Web Audio
+	// decoder chokes on can still be played and heard (it just lacks a spectrogram).
+	const canPlay = $derived(ready || audioReady);
 
 	function draw(colsToShow: number) {
 		if (!canvasEl) return;
@@ -83,7 +89,7 @@
 	}
 
 	function tick() {
-		if (!spec) return;
+		if (!durationMs) return;
 		posMs = performance.now() - playStart;
 		if (posMs >= durationMs) {
 			posMs = durationMs;
@@ -98,7 +104,7 @@
 	// `silent` suppresses error surfacing — used for autoplay, where the browser
 	// may block playback (NotAllowedError) and we just fall back to a manual press.
 	async function play(silent = false) {
-		if (!spec) return;
+		if (!durationMs) return;
 		if (posMs >= durationMs) posMs = 0; // replay from start when finished
 		hasPlayed = true;
 		isPlaying = true;
@@ -192,6 +198,31 @@
 		posMs = durationMs;
 	}
 
+	// The <audio> element decodes the real file — trust its duration over the
+	// throwaway Web Audio decode (which can fail while playback still works).
+	function onLoadedMetadata() {
+		const d = audioEl?.duration;
+		if (Number.isFinite(d) && d > 0) durationMs = d * 1000;
+		audioReady = true;
+	}
+
+	// The element couldn't load/decode this source: bad codec, or a corrupt or
+	// truncated download. Surface it (with the recording id) so the user can jump
+	// over and replace it, instead of a silent 0:00 clip.
+	function onAudioError() {
+		const err = audioEl?.error;
+		if (!err || !audioUrl) return; // ignore the transient error from src=''
+		const codes: Record<number, string> = {
+			1: 'load aborted',
+			2: 'network error',
+			3: 'decode failed',
+			4: 'format not supported'
+		};
+		isPlaying = false;
+		cancelAnimationFrame(raf);
+		audioErr = `Can't play recording #${question?.recording_id}: ${codes[err.code] ?? 'error'}.`;
+	}
+
 	function fmt(ms: number): string {
 		const s = Math.max(0, Math.round(ms / 1000));
 		return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -258,6 +289,8 @@
 		isPlaying = false;
 		hasPlayed = false;
 		ready = false;
+		audioReady = false;
+		specFailed = false;
 		audioErr = '';
 		posMs = 0;
 		durationMs = 0;
@@ -281,8 +314,13 @@
 			if (gen === loadGen) loading = false;
 		}
 		// Decode + spectrogram run in the background so the question UI appears
-		// immediately; the spectrogram fills in when the worker finishes.
-		if (audioUrl) decodeAudio(audioUrl, gen).catch(() => {});
+		// immediately; the spectrogram fills in when the worker finishes. If it
+		// fails, playback still works via the <audio> element — just flag it so
+		// the "analyzing…" state clears instead of hanging with a 0:00 clip.
+		if (audioUrl)
+			decodeAudio(audioUrl, gen).catch(() => {
+				if (gen === loadGen) specFailed = true;
+			});
 	}
 
 	// Reload whenever the route's question index changes — this covers first
@@ -410,7 +448,14 @@
 
 <svelte:window onkeydown={onKey} />
 
-<audio bind:this={audioEl} src={audioUrl ?? ''} preload="auto" onended={onEnded}></audio>
+<audio
+	bind:this={audioEl}
+	src={audioUrl ?? ''}
+	preload="auto"
+	onloadedmetadata={onLoadedMetadata}
+	onerror={onAudioError}
+	onended={onEnded}
+></audio>
 
 <header class="flex items-center justify-between border-b border-be-border px-6 pt-6 pb-4">
 	<button
@@ -491,7 +536,7 @@
 			<div class="flex items-center gap-3">
 				<button
 					onclick={togglePlay}
-					disabled={!ready}
+					disabled={!canPlay}
 					class="flex w-32 items-center justify-center gap-2.5 rounded-lg bg-be-primary px-5 py-2.5 text-sm font-semibold text-be-primary-fg transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
 				>
 					{#if isPlaying}
@@ -529,7 +574,9 @@
 			</button>
 			{#if audioErr}
 				<p class="font-be-mono mt-2 text-xs text-be-destructive">{audioErr}</p>
-			{:else if !ready}
+			{:else if specFailed && canPlay}
+				<p class="font-be-mono mt-2 text-xs text-be-muted-fg">no spectrogram for this one — audio still plays</p>
+			{:else if !canPlay}
 				<p class="font-be-mono mt-2 text-xs text-be-muted-fg">analyzing audio…</p>
 			{:else if !hasPlayed}
 				<p class="font-be-mono mt-2 text-xs text-be-muted-fg">press play to hear the bird</p>

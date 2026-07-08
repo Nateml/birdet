@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { setup } from '$lib/stores/setup';
 	import { getSetting, setSetting, SETTING_EBIRD_KEY, SETTING_XC_KEY } from '$lib/api/settings';
-	import { backfillRecordingMeta } from '$lib/api/recordings';
+	import { backfillRecordingMeta, repairRecordings } from '$lib/api/recordings';
 
 	function setLength(v: number) {
 		const length = Math.max(5, Math.min(50, Math.round(v) || 10));
@@ -27,6 +27,9 @@
 		setTimeout(() => (savedKey === key ? (savedKey = null) : null), 1500);
 	}
 
+	// Dev tools (collapsed by default).
+	let devOpen = $state(false);
+
 	// Back-fill quality/type on recordings imported before those fields existed.
 	let backfilling = $state(false);
 	let backfillMsg = $state<string | null>(null);
@@ -41,6 +44,27 @@
 			backfillMsg = (e as string) ?? 'Backfill failed.';
 		} finally {
 			backfilling = false;
+		}
+	}
+
+	// Re-download recordings whose local audio file is missing or corrupt.
+	let repairing = $state(false);
+	let repairMsg = $state<string | null>(null);
+	async function runRepair() {
+		if (repairing) return;
+		repairing = true;
+		repairMsg = null;
+		try {
+			const r = await repairRecordings();
+			repairMsg =
+				r.repaired === 0 && r.failed === 0
+					? `Checked ${r.checked} — all recordings healthy.`
+					: `Checked ${r.checked}, repaired ${r.repaired}` +
+						(r.failed > 0 ? `, ${r.failed} still broken.` : '.');
+		} catch (e) {
+			repairMsg = (e as string) ?? 'Repair failed.';
+		} finally {
+			repairing = false;
 		}
 	}
 </script>
@@ -159,26 +183,67 @@
 				class="w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40"
 			/>
 		</label>
-		<div class="mt-4 border-t border-be-border pt-4">
-			<div class="flex items-center justify-between gap-4">
-				<span>
-					<span class="block text-sm font-medium">Back-fill recording metadata</span>
-					<span class="block text-xs text-be-muted-fg">
-						Fetch quality &amp; type from Xeno-Canto for older recordings missing them.
+	</div>
+
+	<!-- Dev tools (collapsed) -->
+	<div class="mb-6 rounded-xl border border-be-border bg-be-card p-6">
+		<button
+			type="button"
+			onclick={() => (devOpen = !devOpen)}
+			class="flex w-full items-center justify-between"
+			aria-expanded={devOpen}
+		>
+			<span class="font-be-mono text-xs uppercase tracking-widest text-be-muted-fg">Dev tools</span>
+			<svg
+				width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+				stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+				class="text-be-muted-fg transition-transform {devOpen ? 'rotate-180' : ''}"
+			><path d="m6 9 6 6 6-6"/></svg>
+		</button>
+
+		{#if devOpen}
+			<div class="mt-4 space-y-4">
+				<!-- Repair recordings -->
+				<div class="flex items-center justify-between gap-4">
+					<span>
+						<span class="block text-sm font-medium">Repair recordings</span>
+						<span class="block text-xs text-be-muted-fg">
+							Re-download any recordings whose audio file is missing or corrupt.
+						</span>
 					</span>
-				</span>
-				<button
-					onclick={runBackfill}
-					disabled={backfilling}
-					class="shrink-0 rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
-				>
-					{backfilling ? 'Fetching…' : 'Back-fill'}
-				</button>
+					<button
+						onclick={runRepair}
+						disabled={repairing}
+						class="shrink-0 rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
+					>
+						{repairing ? 'Repairing…' : 'Repair'}
+					</button>
+				</div>
+				{#if repairMsg}
+					<p class="text-xs text-be-muted-fg">{repairMsg}</p>
+				{/if}
+
+				<!-- Back-fill metadata -->
+				<div class="flex items-center justify-between gap-4 border-t border-be-border pt-4">
+					<span>
+						<span class="block text-sm font-medium">Back-fill recording metadata</span>
+						<span class="block text-xs text-be-muted-fg">
+							Fetch quality &amp; type from Xeno-Canto for older recordings missing them.
+						</span>
+					</span>
+					<button
+						onclick={runBackfill}
+						disabled={backfilling}
+						class="shrink-0 rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
+					>
+						{backfilling ? 'Fetching…' : 'Back-fill'}
+					</button>
+				</div>
+				{#if backfillMsg}
+					<p class="text-xs text-be-muted-fg">{backfillMsg}</p>
+				{/if}
 			</div>
-			{#if backfillMsg}
-				<p class="mt-2 text-xs text-be-muted-fg">{backfillMsg}</p>
-			{/if}
-		</div>
+		{/if}
 	</div>
 
 	<!-- About -->

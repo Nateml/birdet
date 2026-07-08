@@ -55,3 +55,10 @@ export async function addBirdRecordings(birdId: number, xcIds: string[]): Promis
 export async function backfillRecordingMeta(): Promise<number> {
     return await invoke<number>('backfill_recording_meta');
 }
+
+export type RepairSummary = { checked: number; repaired: number; failed: number };
+
+// Re-download any Xeno-Canto recordings whose local audio file is missing or corrupt.
+export async function repairRecordings(): Promise<RepairSummary> {
+    return await invoke<RepairSummary>('repair_recordings');
+}

@@ -60,6 +60,7 @@ fn main() -> anyhow::Result<()> {
             commands::search_bird_recordings,
             commands::add_bird_recordings,
             commands::backfill_recording_meta,
+            commands::repair_recordings,
             commands::create_pack,
             commands::create_pack_from_filter,
             commands::list_regions,

@@ -657,6 +657,173 @@ pub async fn backfill_recording_meta(db: &Db) -> Result<i64> {
     Ok(updated)
 }
 
+#[derive(Serialize, Clone)]
+pub struct RepairSummary {
+    pub checked: i64,
+    pub repaired: i64,
+    pub failed: i64,
+}
+
+/// Chromium/WebView2 (and GStreamer) can't decode 24/32-bit PCM WAV, so those
+/// recordings fail to play. Re-quantize such files to 16-bit PCM in place. No-op
+/// for non-WAV files or WAVs already ≤16-bit int. Returns whether it rewrote.
+fn normalize_wav(path: &Path) -> Result<bool> {
+    let mut reader = match hound::WavReader::open(path) {
+        Ok(r) => r,
+        Err(_) => return Ok(false), // not a WAV we can parse — leave untouched
+    };
+    let spec = reader.spec();
+    if spec.sample_format == hound::SampleFormat::Int && spec.bits_per_sample <= 16 {
+        return Ok(false); // already webview-playable
+    }
+    let out_spec = hound::WavSpec {
+        channels: spec.channels,
+        sample_rate: spec.sample_rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let tmp = path.with_extension("wavtmp");
+    {
+        let mut writer = hound::WavWriter::create(&tmp, out_spec)?;
+        match spec.sample_format {
+            hound::SampleFormat::Int => {
+                let shift = spec.bits_per_sample.saturating_sub(16) as u32;
+                for s in reader.samples::<i32>() {
+                    writer.write_sample((s? >> shift) as i16)?;
+                }
+            }
+            hound::SampleFormat::Float => {
+                for s in reader.samples::<f32>() {
+                    let v = (s? * 32767.0).clamp(-32768.0, 32767.0);
+                    writer.write_sample(v as i16)?;
+                }
+            }
+        }
+        writer.finalize()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    Ok(true)
+}
+
+/// Build the playable https URL for an XC `file` field (may be protocol-relative).
+fn xc_file_url(file: &str) -> String {
+    if file.starts_with("//") {
+        format!("https:{}", file)
+    } else {
+        file.to_string()
+    }
+}
+
+/// Does the file look like real, non-truncated audio? Missing, implausibly tiny,
+/// or bytes starting like HTML/JSON (an XC error page saved as audio) → broken.
+fn looks_broken(path: &Path) -> bool {
+    use std::io::Read;
+    match std::fs::metadata(path) {
+        Err(_) => true,
+        Ok(m) if m.len() < 2048 => true,
+        Ok(_) => {
+            let mut buf = [0u8; 16];
+            let n = std::fs::File::open(path)
+                .and_then(|mut f| f.read(&mut buf))
+                .unwrap_or(0);
+            buf[..n]
+                .iter()
+                .find(|b| !b.is_ascii_whitespace())
+                .map(|&b| b == b'<' || b == b'{')
+                .unwrap_or(n == 0)
+        }
+    }
+}
+
+/// Fetch a single XC recording by its catalogue number (the `nr:` tag).
+async fn xc_recording_by_id(
+    client: &reqwest::Client,
+    xc_key: &str,
+    xc_id: &str,
+) -> Option<XcRecording> {
+    let query = format!("nr:{}", xc_id);
+    let body = client
+        .get(format!("{}?query={}&key={}", XC_BASE, enc(&query), enc(xc_key)))
+        .send()
+        .await
+        .ok()?
+        .text()
+        .await
+        .ok()?;
+    serde_json::from_str::<XcResponse>(&body)
+        .ok()?
+        .recordings
+        .into_iter()
+        .find(|r| r.id == xc_id)
+}
+
+/// Scan every downloaded Xeno-Canto recording and re-download any whose local
+/// file is missing, truncated, or a saved error page. Seed audio (no `xc_id`,
+/// read-only in resources) is left alone. Returns a summary for the UI.
+pub async fn repair_recordings(app: &AppHandle, db: &Db) -> Result<RepairSummary> {
+    let xc_key = settings::get_setting(db, "xc_api_key")
+        .await?
+        .filter(|k| !k.trim().is_empty())
+        .ok_or_else(|| anyhow!("Missing Xeno-Canto API key — add it in Settings."))?;
+    let client = regions::build_client()?;
+
+    let rec_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| anyhow!("app data dir: {}", e))?
+        .join("recordings");
+    std::fs::create_dir_all(&rec_dir)?;
+
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+        r#"SELECT id, xc_id, filename FROM recordings
+           WHERE xc_id IS NOT NULL AND source = 'xeno-canto'"#,
+    )
+    .fetch_all(&db.0)
+    .await?;
+
+    let mut summary = RepairSummary { checked: 0, repaired: 0, failed: 0 };
+    for (id, xc_id, filename) in rows {
+        summary.checked += 1;
+
+        // A valid imported file needs no re-download — but a 24/32-bit WAV won't
+        // decode in the webview even though it's intact, so fix that in place.
+        let current = rec_dir.join(&filename);
+        if current.exists() && !looks_broken(&current) {
+            if matches!(normalize_wav(&current), Ok(true)) {
+                summary.repaired += 1;
+            }
+            continue;
+        }
+
+        // Re-download to a guaranteed-safe leaf name (also self-heals any legacy
+        // unsanitized filename), then verify the result actually looks like audio.
+        let safe_name = recording_file_name(&xc_id, &filename);
+        let dest = rec_dir.join(&safe_name);
+        let ok = match xc_recording_by_id(&client, &xc_key, &xc_id).await {
+            Some(r) if !r.file.is_empty() => {
+                download_to(&client, &xc_key, &xc_file_url(&r.file), &dest)
+                    .await
+                    .is_ok()
+            }
+            _ => false,
+        };
+        if ok && !looks_broken(&dest) {
+            if safe_name != filename {
+                let _ = sqlx::query("UPDATE recordings SET filename = ?1 WHERE id = ?2")
+                    .bind(&safe_name)
+                    .bind(id)
+                    .execute(&db.0)
+                    .await;
+            }
+            summary.repaired += 1;
+        } else {
+            summary.failed += 1;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await; // gentle on XC
+    }
+    Ok(summary)
+}
+
 /// Recording metadata for the per-bird recording list.
 #[derive(Serialize, Clone)]
 pub struct RecordingInfo {
@@ -909,6 +1076,19 @@ async fn download_to(
         .send()
         .await?
         .error_for_status()?;
+    // Reject a non-audio body: XC occasionally answers a 200 with an HTML/JSON
+    // error page instead of the file. Saving that as `.mp3` yields a "recording"
+    // that later fails to decode ("format not supported"/0:00). Bail early.
+    if let Some(ct) = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+    {
+        let ct = ct.to_ascii_lowercase();
+        if ct.starts_with("text/") || ct.contains("json") || ct.contains("html") {
+            return Err(anyhow!("expected audio, got {}", ct));
+        }
+    }
     // Reject an oversized download before buffering it: a malicious pack/URL
     // could otherwise exhaust memory or fill the disk. XC recordings are small.
     if let Some(len) = resp.content_length() {
@@ -925,6 +1105,9 @@ async fn download_to(
         return Err(anyhow!("recording too large ({} bytes)", bytes.len()));
     }
     std::fs::write(dest, &bytes)?;
+    // Down-convert 24/32-bit WAV to 16-bit so the webview can decode it.
+    // Best-effort: a failure here still leaves the raw download in place.
+    let _ = normalize_wav(dest);
     Ok(())
 }
 

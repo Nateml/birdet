@@ -230,6 +230,17 @@ pub async fn backfill_recording_meta(state: State<'_, AppState>) -> Result<i64, 
         .map_err(|e| e.to_string())
 }
 
+/// Re-download any XC recordings whose local audio file is missing or corrupt.
+#[tauri::command]
+pub async fn repair_recordings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::services::import::RepairSummary, String> {
+    crate::services::import::repair_recordings(&app, &state.db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Download and add specific Xeno-Canto recordings (by xc_id) to a bird.
 #[tauri::command]
 pub async fn add_bird_recordings(
