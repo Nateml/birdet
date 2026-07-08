@@ -30,6 +30,25 @@ export async function getNextQuestion(
     });
 }
 
+// Mirrors Rust `commands::QueueCounts` — eligible cards left in the session.
+export type QueueCounts = {
+    new: number;
+    learning: number;
+    due: number;
+};
+
+export async function getQueueCounts(
+    pack: string | undefined,
+    newRemaining: number,
+    includeReviews: boolean
+): Promise<QueueCounts> {
+    return await invoke<QueueCounts>('get_queue_counts', {
+        pack: pack ?? null,
+        newRemaining,
+        includeReviews
+    });
+}
+
 export async function submitAnswer(
     bird_id: number,
     recording_id: number,

@@ -36,6 +36,28 @@ pub async fn get_next_question(
         .map_err(|e| e.to_string())
 }
 
+/// Eligible cards remaining in the current session's queue, by bucket. Lets the
+/// UI show a live "N left" so the drain phase isn't an invisible open-ended pile.
+#[derive(Serialize)]
+pub struct QueueCounts {
+    pub new: i64,      // new birds still to introduce (capped by remaining budget)
+    pub learning: i64, // learning/review cards due within the learn-ahead window
+    pub due: i64,      // review cards due now
+}
+
+/// Count the cards `get_next_question` would still serve, with the same scoping.
+#[tauri::command]
+pub async fn get_queue_counts(
+    state: State<'_, AppState>,
+    pack: Option<String>,
+    new_remaining: i64,
+    include_reviews: bool,
+) -> Result<QueueCounts, String> {
+    crate::services::quiz::queue_counts(&state.db, pack, new_remaining, include_reviews)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Deserialize)]
 pub struct AnswerPayload {
     pub bird_id: i64,

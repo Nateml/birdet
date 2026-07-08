@@ -1,5 +1,5 @@
 use crate::db::Db;
-use crate::commands::{Question, AnswerPayload, AnswerResult};
+use crate::commands::{Question, AnswerPayload, AnswerResult, QueueCounts};
 use anyhow::Result;
 use sqlx::Row;
 
@@ -90,6 +90,49 @@ pub async fn next_question(
     Ok(Some(
         build_question(db, row.get("id"), row.get("common_name"), prio == 1).await?,
     ))
+}
+
+/// Count the cards still eligible for this session, bucketed to match the
+/// priorities in `next_question`. `due` = prio 0 (review due now); `learning` =
+/// prio 2 (a non-new card due within the learn-ahead window but not yet due);
+/// `new` = prio 1 available new birds, capped by the remaining budget. Reviews
+/// are gated by `include_reviews` exactly as the picker is.
+pub async fn queue_counts(
+    db: &Db,
+    pack: Option<String>,
+    new_remaining: i64,
+    include_reviews: bool,
+) -> Result<QueueCounts> {
+    let row = sqlx::query(
+        r#"SELECT
+             SUM(CASE WHEN ?2 AND m.bird_id IS NOT NULL AND m.state != 'new'
+                       AND m.due_at IS NOT NULL AND m.due_at <= datetime('now')
+                      THEN 1 ELSE 0 END) AS due_now,
+             SUM(CASE WHEN ?2 AND m.bird_id IS NOT NULL AND m.state != 'new'
+                       AND m.due_at IS NOT NULL AND m.due_at > datetime('now')
+                       AND m.due_at <= datetime('now', ?3)
+                      THEN 1 ELSE 0 END) AS learning_soon,
+             SUM(CASE WHEN (m.bird_id IS NULL OR m.state = 'new') THEN 1 ELSE 0 END) AS new_avail
+           FROM birds b
+           LEFT JOIN mastery m ON m.bird_id = b.id
+           WHERE (?1 IS NULL OR EXISTS (
+               SELECT 1 FROM pack_recordings pr
+               JOIN recordings r ON pr.recording_id = r.id
+               WHERE r.bird_id = b.id AND pr.pack_id = ?1
+           ))"#,
+    )
+    .bind(pack)
+    .bind(include_reviews)
+    .bind(format!("+{} minutes", COLLAPSE_MIN))
+    .fetch_one(&db.0)
+    .await?;
+
+    let due: i64 = row.try_get::<Option<i64>, _>("due_now")?.unwrap_or(0);
+    let learning: i64 = row.try_get::<Option<i64>, _>("learning_soon")?.unwrap_or(0);
+    let new_avail: i64 = row.try_get::<Option<i64>, _>("new_avail")?.unwrap_or(0);
+    let new = new_remaining.max(0).min(new_avail);
+
+    Ok(QueueCounts { new, learning, due })
 }
 
 // Pick a random recording for the bird and 3 random distractors, returning a

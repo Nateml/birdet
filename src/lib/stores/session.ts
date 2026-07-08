@@ -1,5 +1,11 @@
 import { writable, get } from 'svelte/store';
-import { getNextQuestion, submitAnswer, type QuestionDto } from '$lib/api/quiz';
+import {
+    getNextQuestion,
+    submitAnswer,
+    getQueueCounts,
+    type QuestionDto,
+    type QueueCounts
+} from '$lib/api/quiz';
 
 export type Mode = 'multiple' | 'type';
 
@@ -33,7 +39,9 @@ export type SessionState = {
     newServed: number; // brand-new birds introduced so far (against config.length cap)
     answers: AnswerRecord[];
     current: QuestionDto | null; // current question, choices already shuffled
-    finished: boolean; // set once the queue drains (getNextQuestion → null)
+    finished: boolean; // truly over — go to the results screen
+    extended: boolean; // user chose to keep training past the scheduled queue (study-ahead)
+    remaining: QueueCounts | null; // eligible cards left (null for cram / extended / not counted)
 };
 
 export const session = writable<SessionState | null>(null);
@@ -56,8 +64,32 @@ export function startSession(id: string, config: SessionConfig) {
         newServed: 0,
         answers: [],
         current: null,
-        finished: false
+        finished: false,
+        extended: false,
+        remaining: null
     });
+}
+
+// The user cleared their scheduled cards and chose to keep going: switch to
+// study-ahead (pull upcoming cards regardless of due date), like a rolling cram.
+export function continueTraining() {
+    session.update((s) => (s ? { ...s, extended: true, remaining: null } : s));
+}
+
+// Refresh the "cards left" counts for the drain phase. Cram has a fixed length,
+// so it needs none. Non-fatal — a failure just leaves the last known counts.
+async function refreshCounts() {
+    const s = get(session);
+    if (!s || s.config.study === 'cram' || s.extended) return;
+    const includeReviews = s.config.study !== 'new';
+    const newRemaining =
+        s.config.study === 'review' ? 0 : Math.max(0, s.config.length - s.newServed);
+    try {
+        const rc = await getQueueCounts(s.config.pack || undefined, newRemaining, includeReviews);
+        session.update((cur) => (cur ? { ...cur, remaining: rc } : cur));
+    } catch {
+        /* leave prior counts */
+    }
 }
 
 // Fetch the next card from the SRS queue and stash it as `current`. Returns null
@@ -89,11 +121,27 @@ export async function loadQuestion(): Promise<QuestionDto | null> {
         s.config.study === 'review' ? 0 : Math.max(0, s.config.length - s.newServed);
     const q = await getNextQuestion(s.config.pack || undefined, newRemaining, includeReviews);
     if (!q) {
-        session.update((cur) => (cur ? { ...cur, current: null, finished: true } : cur));
+        // Scheduled queue drained (new budget spent + nothing due/learning).
+        if (s.extended) {
+            // Study-ahead: pull any card, soonest-due first (cram-style). Only
+            // truly finished when even that is empty (no birds in the pool).
+            const cq = await getNextQuestion(s.config.pack || undefined, 0, false, true);
+            if (!cq) {
+                session.update((cur) => (cur ? { ...cur, current: null, finished: true } : cur));
+                return null;
+            }
+            const sc: QuestionDto = { ...cq, choices: shuffle(cq.choices) };
+            session.update((cur) => (cur ? { ...cur, current: sc } : cur));
+            return sc;
+        }
+        // Not finished — the UI shows a "scheduled cards done" screen offering
+        // summary-or-continue. `finished` stays false so this isn't the results exit.
+        session.update((cur) => (cur ? { ...cur, current: null } : cur));
         return null;
     }
     const shuffled: QuestionDto = { ...q, choices: shuffle(q.choices) };
     session.update((cur) => (cur ? { ...cur, current: shuffled } : cur));
+    void refreshCounts();
     return shuffled;
 }
 
@@ -126,6 +174,9 @@ export async function answerCurrent(guess: string, skipped = false): Promise<Ans
             newServed
         };
     });
+
+    // Update the "cards left" counts to reflect this answer's rescheduling.
+    void refreshCounts();
 
     return record;
 }

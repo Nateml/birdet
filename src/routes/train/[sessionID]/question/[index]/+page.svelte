@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { get } from 'svelte/store';
-	import { session, loadQuestion, answerCurrent } from '$lib/stores/session';
+	import { session, loadQuestion, answerCurrent, continueTraining } from '$lib/stores/session';
 	import { setup } from '$lib/stores/setup';
 	import { getRecordingBlobUrl } from '$lib/api/audio';
 	import { buildSpectrogramBitmap, drawSpectrogramFrame, type Spectrogram } from '$lib/spectrogram';
@@ -16,6 +16,10 @@
 	let audioUrl = $state<string | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+
+	// Shown when the scheduled queue drains: offer summary-or-continue instead of
+	// jumping straight to results.
+	let completed = $state(false);
 
 	let selected = $state<string | null>(null);
 	let feedback = $state<{
@@ -44,6 +48,13 @@
 	const newShown = $derived(Math.min(newCap, newServed + (currentIsNew ? 1 : 0)));
 	// Modes that introduce new birds show the new-bird budget counter.
 	const showsNewBudget = $derived(study === 'new' || study === 'mixed');
+	// Live "cards left" for the drain phase (new + learning + due). Includes the
+	// card on screen, so it counts down to 0 as the queue empties — giving a clear
+	// sense of when the session ends. Null for cram (fixed length) / before counted.
+	const remaining = $derived($session?.remaining ?? null);
+	const cardsLeft = $derived(remaining ? remaining.new + remaining.learning + remaining.due : null);
+	// Study-ahead mode (user kept training past the scheduled queue).
+	const extended = $derived($session?.extended ?? false);
 	// The progress bar is meaningful only when there's a known target: the
 	// new-card cap (new/mixed) or the fixed cram length. A review-only run
 	// drains an unknown number of due cards, so it has no deterministic bar.
@@ -286,6 +297,7 @@
 		bitmap = null;
 		selected = null;
 		feedback = null;
+		completed = false;
 		isPlaying = false;
 		hasPlayed = false;
 		ready = false;
@@ -302,6 +314,13 @@
 			const q = await loadQuestion();
 			if (gen !== loadGen) return;
 			if (!q) {
+				// No card. If the queue merely drained (not truly finished), show the
+				// "scheduled cards done" screen; otherwise go to the results summary.
+				if ($session && !$session.finished) {
+					completed = true;
+					loading = false;
+					return;
+				}
 				goto(`/train/${id}/result`);
 				return;
 			}
@@ -423,6 +442,23 @@
 		else goto(`/train/${id}/question/${$session.index}`);
 	}
 
+	// From the "scheduled cards done" screen: go to the results summary.
+	function toSummary() {
+		try {
+			audioEl?.pause();
+		} catch {
+			/* noop */
+		}
+		goto(`/train/${id}/result`);
+	}
+
+	// From the "scheduled cards done" screen: keep going in study-ahead mode.
+	async function keepTraining() {
+		continueTraining();
+		completed = false;
+		await init();
+	}
+
 	// Jump to this recording on its bird's page (to replace/delete a bad one).
 	// Only reachable after answering, so it doesn't spoil the identity.
 	function manageRecording() {
@@ -490,12 +526,59 @@
 					{newShown} / {newCap} new
 				</span>
 			{/if}
+			<!-- Cards left in the queue (incl. this one), so the end is visible. In
+			     study-ahead mode there's no target, so show a mode chip instead. -->
+			{#if extended}
+				<span class="font-be-mono rounded-full bg-be-secondary px-2.5 py-1 text-xs text-be-secondary-fg" title="Studying ahead — practising cards before they're due. No effect beyond normal scheduling.">
+					study ahead
+				</span>
+			{:else if cardsLeft !== null}
+				<span
+					class="font-be-mono rounded-full bg-be-muted px-2.5 py-1 text-xs text-be-muted-fg"
+					title="Cards left this session: {remaining?.new} new · {remaining?.learning} learning · {remaining?.due} due. Learning cards keep coming back until answered correctly."
+				>
+					{cardsLeft} left
+				</span>
+			{/if}
 		{/if}
 	</div>
 </header>
 
 <main class="mx-auto max-w-2xl px-6 pt-6 pb-12">
-	{#if loading}
+	{#if completed}
+		<!-- Scheduled queue drained: all new + due (+ in-window learning) cleared. -->
+		<div class="mx-auto mt-10 max-w-md text-center">
+			<div class="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-be-primary/15 text-be-primary">
+				<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/></svg>
+			</div>
+			<h2 class="font-be-serif text-2xl font-bold leading-tight">All caught up</h2>
+			<p class="mt-2 text-sm text-be-muted-fg">
+				You've cleared every new and due card for this session.
+			</p>
+			{#if answered.length > 0}
+				<p class="font-be-mono mt-3 text-xs text-be-muted-fg">
+					{scoreSoFar}/{answered.length} correct
+				</p>
+			{/if}
+			<div class="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
+				<button
+					onclick={toSummary}
+					class="rounded-lg bg-be-primary px-5 py-2.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90"
+				>
+					See summary
+				</button>
+				<button
+					onclick={keepTraining}
+					class="rounded-lg border border-be-border px-5 py-2.5 text-sm font-semibold transition-colors hover:bg-be-secondary"
+				>
+					Keep training →
+				</button>
+			</div>
+			<p class="font-be-mono mt-4 text-[11px] text-be-muted-fg">
+				Keep training studies cards ahead of their due date.
+			</p>
+		</div>
+	{:else if loading}
 		<p class="font-be-mono text-sm text-be-muted-fg">loading question…</p>
 	{:else if error}
 		<div class="rounded-lg border border-be-destructive/40 bg-be-destructive/10 px-4 py-3 text-sm text-be-destructive">
