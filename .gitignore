@@ -24,3 +24,6 @@ vite.config.ts.timestamp-*
 
 # Figma reference export (not app code)
 figma-export/
+
+# Claude
+CLAUDE.md
