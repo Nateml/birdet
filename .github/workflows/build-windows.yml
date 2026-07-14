@@ -1,10 +1,11 @@
-name: Build Windows
+name: Build
 
-# Builds the Windows installer.
+# Builds the Windows + Linux installers.
 #   - Push a tag like `v0.1.0`  → creates a draft GitHub Release with the
-#     installer attached (share that link with beta testers).
-#   - Run manually (workflow_dispatch) → uploads the installer as a build
-#     artifact you can download from the run, without cutting a release.
+#     Windows (.exe) and Linux (.AppImage, .deb) bundles attached, plus a
+#     merged latest.json for the in-app updater.
+#   - Run manually (workflow_dispatch) → uploads the bundles as build artifacts
+#     you can download from the run, without cutting a release.
 on:
   push:
     tags:
@@ -103,4 +104,72 @@ jobs:
         with:
           name: birdet-windows
           path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-22.04
+    # Run after Windows so both jobs attach to the same release and tauri-action
+    # merges each platform into a single `latest.json` (rather than racing on it).
+    needs: windows
+    env:
+      SQLX_OFFLINE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build app + bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SQLX_OFFLINE: 'true'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tauriScript: pnpm tauri:ci
+          # The config targets NSIS (Windows); override to the Linux bundles.
+          # AppImage is what the in-app updater self-updates; the .deb is a
+          # manual-install extra.
+          args: --bundles appimage deb
+          # Same tag as the Windows job → assets land on the same draft release
+          # and latest.json gains the linux platform entry.
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: Birdet ${{ github.ref_name }}
+          releaseDraft: true
+
+      - name: Upload Linux artifacts
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: birdet-linux
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
