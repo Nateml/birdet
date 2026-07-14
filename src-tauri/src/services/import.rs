@@ -162,6 +162,22 @@ struct XcRecording {
     length: String, // duration "m:ss"
     #[serde(rename = "type", default)]
     rec_type: String, // vocalization type
+    #[serde(default)]
+    gen: String, // XC genus
+    #[serde(default)]
+    sp: String, // XC species epithet
+}
+
+/// The scientific name Xeno-Canto files a recording under ("Genus species"),
+/// or `None` if XC didn't supply one. Used to show what name the English-name
+/// fallback actually resolved to, since it may differ from the eBird binomial.
+fn xc_binomial(r: &XcRecording) -> Option<String> {
+    let (g, s) = (r.gen.trim(), r.sp.trim());
+    if g.is_empty() && s.is_empty() {
+        None
+    } else {
+        Some(format!("{} {}", g, s).trim().to_string())
+    }
 }
 
 /// A Xeno-Canto recording not yet downloaded, offered for adding to a bird.
@@ -663,6 +679,25 @@ fn xc_query(term: &str, quality: Option<&str>, rec_type: Option<&str>) -> String
     q
 }
 
+/// Candidate `en:"…"` query terms for a common name, tolerant to hyphen-vs-space
+/// differences between eBird and XC (e.g. eBird "Western-Cattle Egret" vs XC
+/// "Western Cattle Egret"). Ordered (exact first), deduped.
+fn english_terms(com_name: &str) -> Vec<String> {
+    let name = com_name.trim();
+    if name.is_empty() {
+        return vec![];
+    }
+    let mut variants = vec![name.to_string()];
+    if name.contains('-') {
+        // Hyphens → spaces, collapsing any doubled whitespace.
+        let spaced = name.replace('-', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+        if spaced != name {
+            variants.push(spaced);
+        }
+    }
+    variants.into_iter().map(|v| format!("en:\"{}\"", v)).collect()
+}
+
 /// Raw XC recordings for a prepared query string. Tolerant: [] on any error.
 async fn xc_fetch(client: &reqwest::Client, xc_key: &str, query: &str) -> Vec<XcRecording> {
     match client
@@ -738,12 +773,14 @@ async fn xc_recordings_for(
         return (by_sci, false);
     }
     if let Some(com) = com_name.map(str::trim).filter(|s| !s.is_empty()) {
-        let by_en = xc_fetch(client, xc_key, &xc_query(&format!("en:\"{}\"", com), quality, rec_type)).await;
-        if by_en.iter().any(|r| !r.file.is_empty()) {
-            return (by_en, true);
+        for term in english_terms(com) {
+            let by_en = xc_fetch(client, xc_key, &xc_query(&term, quality, rec_type)).await;
+            if by_en.iter().any(|r| !r.file.is_empty()) {
+                return (by_en, true);
+            }
         }
     }
-    (by_sci, false) // both empty — return the (empty) sci result, no fallback flag
+    (by_sci, false) // all attempts empty — return the (empty) sci result, no fallback flag
 }
 
 /// Look up a bird's scientific + common name.
@@ -765,7 +802,8 @@ async fn bird_names(db: &Db, bird_id: i64) -> Result<(String, String)> {
 pub struct RecordingSearch {
     pub candidates: Vec<RecordingCandidate>,
     pub name_fallback: bool,
-    pub scientific_name: String,
+    pub scientific_name: String,     // the eBird name we queried
+    pub xc_name: Option<String>,     // the name XC files these under (fallback only)
 }
 
 /// Search Xeno-Canto for more recordings of a bird already in the library,
@@ -793,6 +831,8 @@ pub async fn search_recordings(
 
     let (recs, name_fallback) =
         xc_recordings_for(&client, &xc_key, &sci, Some(&com), quality.as_deref(), rec_type.as_deref()).await;
+    // When we fell back to the English name, note the binomial XC actually uses.
+    let xc_name = if name_fallback { recs.iter().find_map(xc_binomial) } else { None };
     let candidates = recs
         .into_iter()
         .filter(|r| !r.file.is_empty() && !have.contains(&r.id))
@@ -806,7 +846,7 @@ pub async fn search_recordings(
             license_url: r.lic,
         })
         .collect();
-    Ok(RecordingSearch { candidates, name_fallback, scientific_name: sci })
+    Ok(RecordingSearch { candidates, name_fallback, scientific_name: sci, xc_name })
 }
 
 /// Download and insert specific Xeno-Canto recordings (by xc_id) for a bird
@@ -1246,7 +1286,7 @@ async fn import_taxa(
     // Launch one species task. Clones everything it needs so the future is
     // 'static (spawnable); returns its input index so results stay ordered, plus
     // whether the English-name fallback was used (a possible name mismatch).
-    let launch = |set: &mut JoinSet<Result<(usize, Option<i64>, i64, bool)>>, i: usize, taxon: Taxon| {
+    let launch = |set: &mut JoinSet<Result<(usize, Option<i64>, i64, bool, Option<String>)>>, i: usize, taxon: Taxon| {
         let (app, db, client) = (app.clone(), db.clone(), client.clone());
         let xc_key = xc_key.to_string();
         let rec_dir = rec_dir.to_path_buf();
@@ -1255,16 +1295,16 @@ async fn import_taxa(
         let rec_type = rec_type.map(str::to_string);
         let throttle = throttle.clone();
         set.spawn(async move {
-            let (bird_id, recs, used_english) = fetch_species(
+            let (bird_id, recs, used_english, xc_name) = fetch_species(
                 &app, &db, &client, &xc_key, &rec_dir, &taxon, &region,
                 quality.as_deref(), rec_type.as_deref(), max_per_species, i as i64, total, &throttle,
             )
             .await?;
-            Ok((i, bird_id, recs, used_english))
+            Ok((i, bird_id, recs, used_english, xc_name))
         });
     };
 
-    let mut set: JoinSet<Result<(usize, Option<i64>, i64, bool)>> = JoinSet::new();
+    let mut set: JoinSet<Result<(usize, Option<i64>, i64, bool, Option<String>)>> = JoinSet::new();
     let mut pending = taxa.iter().cloned().enumerate();
     for (i, taxon) in pending.by_ref().take(SPECIES_CONCURRENCY) {
         launch(&mut set, i, taxon);
@@ -1279,13 +1319,16 @@ async fn import_taxa(
         // A task's own Result: propagate a hard error (DB failure etc.) rather
         // than silently dropping species; a join panic counts as a skip.
         match res {
-            Ok(Ok((i, bird_id, recs, used_english))) => {
+            Ok(Ok((i, bird_id, recs, used_english, xc_name))) => {
                 recordings_added += recs;
                 match bird_id {
                     Some(id) => {
                         slots[i] = Some(id);
                         if used_english {
-                            mismatches.push(taxa[i].com_name.clone());
+                            mismatches.push(match xc_name {
+                                Some(n) => format!("{} → XC: {}", taxa[i].com_name, n),
+                                None => taxa[i].com_name.clone(),
+                            });
                         }
                     }
                     None => skipped += 1,
@@ -1326,7 +1369,7 @@ async fn fetch_species(
     idx: i64,
     total: i64,
     throttle: &Throttle,
-) -> Result<(Option<i64>, i64, bool)> {
+) -> Result<(Option<i64>, i64, bool, Option<String>)> {
     // Pace the rate-limited API query (shared across concurrent species tasks).
     throttle.api_slot().await;
 
@@ -1334,19 +1377,29 @@ async fn fetch_species(
     let sci_query = xc_query(&format!("sp:\"{}\"", taxon.sci_name), quality, rec_type);
     let mut recordings = xc_fetch_diag(app, client, xc_key, &sci_query, idx, total).await;
 
-    // Fallback: if the sci-name query found nothing usable, retry by English
-    // name. eBird (Clements) and XC diverge on some binomials after genus
-    // splits/merges, so the sci-name query misses a species XC has under a
-    // different name. Flag it so the user can verify the match.
+    // Fallback: if the sci-name query returned no usable recordings (XC has the
+    // species under a different binomial, or the name resolved but has zero
+    // recordings), retry by English name. eBird (Clements) and XC diverge on
+    // some binomials after genus splits/merges. Capture the name XC actually
+    // files it under so the user can verify the match.
     let mut used_english = false;
-    if !recordings.iter().any(|r| !r.file.is_empty()) && !taxon.com_name.trim().is_empty() {
-        throttle.api_slot().await;
-        let en_query = xc_query(&format!("en:\"{}\"", taxon.com_name), quality, rec_type);
-        let en_recs = xc_fetch_diag(app, client, xc_key, &en_query, idx, total).await;
-        if en_recs.iter().any(|r| !r.file.is_empty()) {
-            emit(app, "downloading", format!("⚠ no XC match for '{}' — used English name '{}'; verify species", taxon.sci_name, taxon.com_name), idx, total);
-            recordings = en_recs;
-            used_english = true;
+    let mut xc_name: Option<String> = None;
+    if !recordings.iter().any(|r| !r.file.is_empty()) {
+        // Try each English-name variant (exact, then hyphen-normalized) until one
+        // returns recordings.
+        for term in english_terms(&taxon.com_name) {
+            throttle.api_slot().await;
+            let en_recs = xc_fetch_diag(app, client, xc_key, &xc_query(&term, quality, rec_type), idx, total).await;
+            if en_recs.iter().any(|r| !r.file.is_empty()) {
+                xc_name = en_recs.iter().find_map(xc_binomial);
+                emit(app, "downloading", format!(
+                    "⚠ no XC recordings under '{}' — matched by English name '{}'; XC files it as '{}'. Verify species.",
+                    taxon.sci_name, taxon.com_name, xc_name.as_deref().unwrap_or("?"),
+                ), idx, total);
+                recordings = en_recs;
+                used_english = true;
+                break;
+            }
         }
     }
 
@@ -1357,7 +1410,7 @@ async fn fetch_species(
         .collect();
 
     if picks.is_empty() {
-        return Ok((None, 0, false));
+        return Ok((None, 0, false, None));
     }
 
     let bird_id = upsert_bird(db, taxon, region).await?;
@@ -1395,7 +1448,7 @@ async fn fetch_species(
         }
     }
 
-    Ok((Some(bird_id), recs, used_english))
+    Ok((Some(bird_id), recs, used_english, xc_name))
 }
 
 /// Is this status worth retrying? XC's download host answers 503/502/504 under
@@ -1552,6 +1605,18 @@ mod tests {
         assert_eq!(extract_region_code("US-NY-109").as_deref(), Some("US-NY-109"));
         assert_eq!(extract_region_code("L12345").as_deref(), Some("L12345"));
         assert_eq!(extract_region_code("Turdus migratorius"), None); // has a space
+    }
+
+    #[test]
+    fn english_terms_handles_hyphens() {
+        // No hyphen → single exact term.
+        assert_eq!(english_terms("Mallard"), vec!["en:\"Mallard\""]);
+        // Hyphen → exact first, then hyphen-normalized.
+        assert_eq!(
+            english_terms("Western-Cattle Egret"),
+            vec!["en:\"Western-Cattle Egret\"", "en:\"Western Cattle Egret\""]
+        );
+        assert_eq!(english_terms("  "), Vec::<String>::new());
     }
 
     #[test]

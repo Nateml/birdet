@@ -50,6 +50,7 @@
 	let searchError = $state<string | null>(null);
 	let candidates = $state<RecordingCandidate[]>([]);
 	let nameFallback = $state(false);
+	let xcName = $state<string | null>(null);
 	let searched = $state(false);
 	let toAdd = $state<Set<string>>(new Set());
 	let confirmingDeleteBird = $state(false);
@@ -162,11 +163,13 @@
 			const res = await searchBirdRecordings(birdId, quality || undefined, recType || undefined);
 			candidates = res.candidates;
 			nameFallback = res.name_fallback;
+			xcName = res.xc_name;
 			searched = true;
 		} catch (e) {
 			searchError = (e as string) ?? 'Search failed.';
 			candidates = [];
 			nameFallback = false;
+			xcName = null;
 		} finally {
 			searching = false;
 		}
@@ -286,8 +289,9 @@
 				{#if searched && !searching}
 					{#if nameFallback}
 						<p class="mt-3 rounded-lg border border-be-accent/40 bg-be-accent/10 px-3 py-2 text-xs text-be-accent">
-							⚠ No Xeno-Canto recordings under this bird's scientific name — these are matched by
-							English name instead, so double-check they're the right species before adding.
+							⚠ No Xeno-Canto recordings under this bird's scientific name — matched by English name
+							instead{#if xcName}, filed on Xeno-Canto as <em>{xcName}</em>{/if}. Double-check they're the
+							right species before adding.
 						</p>
 					{/if}
 					<div class="mt-4 max-h-72 space-y-1 overflow-y-auto">

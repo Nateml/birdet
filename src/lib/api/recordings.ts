@@ -42,7 +42,8 @@ export type RecordingSearch = {
     // Results came from the English-name fallback, not the eBird scientific
     // name — the recordings may be filed under a different species name.
     name_fallback: boolean;
-    scientific_name: string;
+    scientific_name: string; // the eBird name we queried
+    xc_name: string | null; // the name Xeno-Canto files these under (fallback only)
 };
 
 export async function searchBirdRecordings(
