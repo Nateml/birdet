@@ -98,6 +98,12 @@ pub struct ImportParams {
     pub rec_type: Option<String>,   // XC vocalization type, e.g. "song"
     pub family: Option<String>,     // restrict to a family common name
     pub create_pack: bool,          // auto-create a pack from the import
+    #[serde(default = "default_true")]
+    pub skip_existing: bool,        // skip species already in the library (fill the cap with new ones)
+}
+
+fn default_true() -> bool {
+    true
 }
 
 // --- Progress events emitted to the frontend ----------------------------
@@ -243,6 +249,18 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
     // chunk or two of taxonomy calls instead of resolving the whole region.
     let family_filter = params.family.as_deref().map(str::to_lowercase);
     let cap = params.max_species.max(1) as usize;
+    // Species already in the library, so the cap fills with new birds (and we
+    // don't re-query/re-download ones the user already has). Skipped unless the
+    // caller opts to re-import.
+    let owned: std::collections::HashSet<String> = if params.skip_existing {
+        sqlx::query_scalar("SELECT ebird_code FROM birds WHERE ebird_code IS NOT NULL")
+            .fetch_all(&db.0)
+            .await?
+            .into_iter()
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
     let mut taxa_by_code: std::collections::HashMap<String, Taxon> = std::collections::HashMap::new();
     let mut targets: Vec<String> = Vec::new();
     for chunk in ranked.chunks(100) {
@@ -264,6 +282,9 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
             if targets.len() >= cap {
                 break;
             }
+            if owned.contains(code) {
+                continue; // already in the library — don't spend the cap on it
+            }
             let Some(t) = taxa_by_code.get(code) else { continue }; // no name
             if let Some(fam) = &family_filter {
                 let matches = t
@@ -283,7 +304,11 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
     }
 
     if targets.is_empty() {
-        return Err(anyhow!("No species matched the filter."));
+        return Err(if params.skip_existing && !owned.is_empty() {
+            anyhow!("No new species matched — you may already have them all. Turn off “skip existing” to re-import.")
+        } else {
+            anyhow!("No species matched the filter.")
+        });
     }
 
     let rec_dir = app

@@ -10,6 +10,7 @@ export type ImportParams = {
     rec_type: string | null;
     family: string | null;
     create_pack: boolean;
+    skip_existing: boolean;
 };
 
 export type ImportProgress = {
