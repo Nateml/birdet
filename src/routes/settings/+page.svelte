@@ -3,6 +3,7 @@
 	import { setup } from '$lib/stores/setup';
 	import { getSetting, setSetting, SETTING_EBIRD_KEY, SETTING_XC_KEY } from '$lib/api/settings';
 	import { backfillRecordingMeta, repairRecordings } from '$lib/api/recordings';
+	import { updateState, checkForUpdate, installUpdate } from '$lib/stores/updater';
 	import logo from '$lib/assets/logo.svg';
 
 	function setLength(v: number) {
@@ -26,6 +27,14 @@
 		await setSetting(key, value.trim());
 		savedKey = key;
 		setTimeout(() => (savedKey === key ? (savedKey = null) : null), 1500);
+	}
+
+	// Updates.
+	const u = $derived($updateState);
+	const checking = $derived(u.status === 'checking');
+	async function manualCheck() {
+		if (checking) return;
+		await checkForUpdate({ silent: false });
 	}
 
 	// Dev tools (collapsed by default).
@@ -243,6 +252,62 @@
 				{#if backfillMsg}
 					<p class="text-xs text-be-muted-fg">{backfillMsg}</p>
 				{/if}
+			</div>
+		{/if}
+	</div>
+
+	<!-- Updates -->
+	<div class="mb-6 rounded-xl border border-be-border bg-be-card p-6">
+		<p class="font-be-mono mb-4 text-xs uppercase tracking-widest text-be-muted-fg">Updates</p>
+		<div class="flex items-center justify-between gap-4">
+			<span>
+				<span class="block text-sm font-medium">App updates</span>
+				<span class="block text-xs text-be-muted-fg">
+					{#if u.status === 'checking'}
+						Checking for updates…
+					{:else if u.status === 'available'}
+						Version {u.version} is available.
+					{:else if u.status === 'downloading'}
+						Downloading… {Math.round((u.progress ?? 0) * 100)}%
+					{:else if u.status === 'ready'}
+						Installing — the app will restart.
+					{:else if u.status === 'up-to-date'}
+						You're on the latest version{#if u.currentVersion} (v{u.currentVersion}){/if}.
+					{:else if u.status === 'error'}
+						Couldn't check for updates. Try again later.
+					{:else if u.status === 'unsupported'}
+						Updates aren't available in this build.
+					{:else}
+						{#if u.currentVersion}Current version v{u.currentVersion}.{:else}Check GitHub for a newer release.{/if}
+					{/if}
+				</span>
+			</span>
+			<button
+				onclick={manualCheck}
+				disabled={checking || u.status === 'downloading' || u.status === 'ready'}
+				class="shrink-0 rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
+			>
+				{checking ? 'Checking…' : 'Check for updates'}
+			</button>
+		</div>
+
+		{#if u.status === 'available'}
+			{#if u.notes}
+				<div class="mt-4 max-h-40 overflow-y-auto whitespace-pre-line rounded-lg border border-be-border bg-be-bg px-3 py-2 text-xs text-be-muted-fg">
+					{u.notes}
+				</div>
+			{/if}
+			<button
+				onclick={installUpdate}
+				class="mt-4 w-full rounded-lg bg-be-primary px-4 py-2.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90"
+			>
+				Install v{u.version} &amp; restart
+			</button>
+		{/if}
+
+		{#if u.status === 'downloading'}
+			<div class="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-be-muted">
+				<div class="h-full rounded-full bg-be-primary transition-all" style="width: {(u.progress ?? 0) * 100}%"></div>
 			</div>
 		{/if}
 	</div>
