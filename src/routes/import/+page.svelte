@@ -49,7 +49,16 @@
 	let resolving = $state(false);
 	let listError = $state<string | null>(null);
 	let showUnresolved = $state(false);
+	let reimportExisting = $state(false);
 	let csvInput = $state<HTMLInputElement>();
+
+	// Split the resolved list into new vs. already-owned species.
+	const listNew = $derived(listPreview?.species.filter((s) => !s.in_library) ?? []);
+	const listExisting = $derived(listPreview?.species.filter((s) => s.in_library) ?? []);
+	// Codes actually imported: new ones, plus existing if the user opts to re-fetch.
+	const listCodes = $derived(
+		reimportExisting ? [...listNew, ...listExisting] : listNew
+	);
 
 	// Run state (shared)
 	let running = $state(false);
@@ -207,12 +216,12 @@
 	}
 
 	async function runList() {
-		if (!listPreview || listPreview.species.length === 0 || running || $importJob.active) return;
+		if (listCodes.length === 0 || running || $importJob.active) return;
 		resetRun();
 		try {
-			summary = await runImportJob(listPreview.source || 'list', () =>
+			summary = await runImportJob(listPreview?.source || 'list', () =>
 				importSpecies({
-					ebirdCodes: listPreview!.species.map((s) => s.ebird_code),
+					ebirdCodes: listCodes.map((s) => s.ebird_code),
 					quality: quality || null,
 					recType: recType || null,
 					maxPerSpecies: Math.max(1, Math.round(maxPerSpecies) || 1),
@@ -222,6 +231,7 @@
 			);
 			listPreview = null;
 			listInput = '';
+			reimportExisting = false;
 			newPackName = '';
 			packTargets = new Set();
 			try {
@@ -450,8 +460,8 @@
 			<p class="mb-3 text-xs leading-relaxed text-be-muted-fg">
 				Works with an eBird <strong>checklist</strong>, <strong>hotspot</strong>, or
 				<strong>region</strong> URL — or your own <strong>life list</strong>. For a life list, open it
-				on eBird, hit <em>Download (CSV)</em>, then paste the file below or choose it. Species you
-				already have are skipped automatically.
+				on eBird, hit <em>Download (CSV)</em>, then paste the file below or choose it. Species already
+				in your library are skipped by default (you can opt to re-fetch them).
 			</p>
 			<textarea
 				bind:value={listInput}
@@ -495,7 +505,10 @@
 				<div class="mt-4 border-t border-be-border pt-4">
 					<p class="mb-2 text-sm">
 						<span class="font-be-mono text-xs uppercase tracking-widest text-be-muted-fg">{listPreview.source}</span>
-						<span class="ml-2 font-medium">{listPreview.species.length} species</span>
+						<span class="ml-2 font-medium">{listNew.length} new</span>
+						{#if listExisting.length > 0}
+							<span class="ml-2 text-be-muted-fg">· {listExisting.length} already in library</span>
+						{/if}
 						{#if listPreview.unresolved.length > 0}
 							<button onclick={() => (showUnresolved = !showUnresolved)}
 								class="ml-2 text-xs text-be-muted-fg underline">{listPreview.unresolved.length} unmatched</button>
@@ -506,9 +519,23 @@
 							Not eBird species (hybrids, “sp.” entries, or spelling): {listPreview.unresolved.join(', ')}
 						</p>
 					{/if}
+
+					{#if listExisting.length > 0}
+						<label class="mb-2 flex items-center gap-2.5 text-sm">
+							<input type="checkbox" bind:checked={reimportExisting} disabled={running} class="accent-be-primary" />
+							<span>Also re-fetch the {listExisting.length} bird{listExisting.length === 1 ? '' : 's'} I already have <span class="text-be-muted-fg">(pull fresh recordings)</span></span>
+						</label>
+					{/if}
+
 					<div class="max-h-52 space-y-0.5 overflow-y-auto rounded-lg border border-be-border p-2 text-sm">
-						{#each listPreview.species as s (s.ebird_code)}
+						{#each listNew as s (s.ebird_code)}
 							<div class="truncate px-2 py-1">{s.common_name}</div>
+						{/each}
+						{#each listExisting as s (s.ebird_code)}
+							<div class="flex items-center justify-between gap-2 px-2 py-1 {reimportExisting ? '' : 'opacity-45'}">
+								<span class="truncate">{s.common_name}</span>
+								<span class="font-be-mono shrink-0 text-xs text-be-muted-fg">in library</span>
+							</div>
 						{/each}
 					</div>
 				</div>
@@ -562,10 +589,14 @@
 
 				<button
 					onclick={runList}
-					disabled={running || $importJob.active || listPreview.species.length === 0 || !hasKeys}
+					disabled={running || $importJob.active || listCodes.length === 0 || !hasKeys}
 					class="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-be-primary px-5 py-2.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50"
 				>
-					{running ? 'Importing…' : `Import ${listPreview.species.length} ${listPreview.species.length === 1 ? 'bird' : 'birds'}`}
+					{running
+						? 'Importing…'
+						: listCodes.length === 0
+							? 'Nothing new to import'
+							: `Import ${listCodes.length} ${listCodes.length === 1 ? 'bird' : 'birds'}`}
 				</button>
 			{/if}
 		</div>

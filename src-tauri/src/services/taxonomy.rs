@@ -113,11 +113,13 @@ pub async fn search(db: &Db, query: &str, limit: i64) -> Result<Vec<SpeciesResul
         .collect())
 }
 
-/// A resolved species: its eBird code + common name, for import previews.
+/// A resolved species: its eBird code + common name, plus whether it's already
+/// in the library — for import previews.
 #[derive(Serialize, Clone)]
 pub struct SpeciesLite {
     pub ebird_code: String,
     pub common_name: String,
+    pub in_library: bool,
 }
 
 /// Resolve free-text species names (as found in an eBird CSV export) to eBird
@@ -147,8 +149,10 @@ pub async fn resolve_names(
             continue;
         }
         let row = sqlx::query(
-            r#"SELECT ebird_code, common_name FROM taxonomy
-               WHERE lower(scientific_name) = ?1 OR lower(common_name) = ?1
+            r#"SELECT t.ebird_code, t.common_name,
+                      (SELECT 1 FROM birds b WHERE b.ebird_code = t.ebird_code) AS in_lib
+               FROM taxonomy t
+               WHERE lower(t.scientific_name) = ?1 OR lower(t.common_name) = ?1
                LIMIT 1"#,
         )
         .bind(&key)
@@ -158,7 +162,11 @@ pub async fn resolve_names(
             Some(r) => {
                 let code: String = r.get("ebird_code");
                 if seen.insert(code.clone()) {
-                    matched.push(SpeciesLite { ebird_code: code, common_name: r.get("common_name") });
+                    matched.push(SpeciesLite {
+                        ebird_code: code,
+                        common_name: r.get("common_name"),
+                        in_library: r.get::<Option<i64>, _>("in_lib").is_some(),
+                    });
                 }
             }
             None => unresolved.push(n.to_string()),
@@ -176,13 +184,20 @@ pub async fn species_lite_for(db: &Db, codes: &[String]) -> Result<Vec<SpeciesLi
         if !seen.insert(code.clone()) {
             continue;
         }
-        if let Some(r) =
-            sqlx::query("SELECT ebird_code, common_name FROM taxonomy WHERE ebird_code = ?1")
-                .bind(code)
-                .fetch_optional(&db.0)
-                .await?
+        if let Some(r) = sqlx::query(
+            r#"SELECT t.ebird_code, t.common_name,
+                      (SELECT 1 FROM birds b WHERE b.ebird_code = t.ebird_code) AS in_lib
+               FROM taxonomy t WHERE t.ebird_code = ?1"#,
+        )
+        .bind(code)
+        .fetch_optional(&db.0)
+        .await?
         {
-            out.push(SpeciesLite { ebird_code: r.get("ebird_code"), common_name: r.get("common_name") });
+            out.push(SpeciesLite {
+                ebird_code: r.get("ebird_code"),
+                common_name: r.get("common_name"),
+                in_library: r.get::<Option<i64>, _>("in_lib").is_some(),
+            });
         }
     }
     Ok(out)

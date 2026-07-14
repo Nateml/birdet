@@ -67,6 +67,7 @@ export async function importSpecies(opts: {
 export type SpeciesLite = {
     ebird_code: string;
     common_name: string;
+    in_library: boolean;
 };
 
 // Mirrors Rust `services::import::ListPreview`.
