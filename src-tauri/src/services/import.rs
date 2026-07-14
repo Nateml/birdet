@@ -5,11 +5,58 @@ use crate::services::taxonomy::{self, Taxon};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::{Mutex, Semaphore};
+use tokio::task::JoinSet;
 
 const EBIRD_BASE: &str = "https://api.ebird.org/v2";
 const XC_BASE: &str = "https://xeno-canto.org/api/3/recordings";
+
+/// Number of species downloaded concurrently during an import. XC API queries
+/// are still spaced by `Throttle` regardless, so this only overlaps the
+/// download + DB work between species.
+const SPECIES_CONCURRENCY: usize = 4;
+/// Ceiling on in-flight media downloads across the whole run (CDN host, not the
+/// rate-limited API), so a large `max_per_species` can't fan out unbounded.
+const DOWNLOAD_CONCURRENCY: usize = 8;
+/// Minimum spacing between Xeno-Canto *API* queries (the rate-limited endpoint).
+const XC_API_MIN_INTERVAL: Duration = Duration::from_millis(300);
+
+/// Shared throttles for one concurrent import run: paces the XC API queries and
+/// caps concurrent media downloads. Cheap to `clone` into each species task.
+#[derive(Clone)]
+struct Throttle {
+    api_gate: Arc<Mutex<Instant>>,
+    downloads: Arc<Semaphore>,
+}
+
+impl Throttle {
+    fn new() -> Self {
+        Throttle {
+            api_gate: Arc::new(Mutex::new(
+                Instant::now()
+                    .checked_sub(XC_API_MIN_INTERVAL)
+                    .unwrap_or_else(Instant::now),
+            )),
+            downloads: Arc::new(Semaphore::new(DOWNLOAD_CONCURRENCY)),
+        }
+    }
+
+    /// Block until the next XC API query is allowed, then claim the slot. Holding
+    /// the lock across the sleep serializes callers, so queries stay ≥
+    /// `XC_API_MIN_INTERVAL` apart no matter how many species run in parallel.
+    async fn api_slot(&self) {
+        let mut last = self.api_gate.lock().await;
+        let earliest = *last + XC_API_MIN_INTERVAL;
+        let now = Instant::now();
+        if earliest > now {
+            tokio::time::sleep(earliest - now).await;
+        }
+        *last = Instant::now();
+    }
+}
 
 /// Cap on a single downloaded recording. XC files are a few MB; this only
 /// exists to stop a malicious pack/URL from exhausting memory or disk.
@@ -85,7 +132,7 @@ struct XcResponse {
     recordings: Vec<XcRecording>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct XcRecording {
     id: String,
     #[serde(default)]
@@ -238,12 +285,6 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
         return Err(anyhow!("No species matched the filter."));
     }
 
-    let total = targets.len() as i64;
-    let mut species_imported = 0i64;
-    let mut species_skipped = 0i64;
-    let mut recordings_added = 0i64;
-    let mut imported_bird_ids: Vec<i64> = Vec::new();
-
     let rec_dir = app
         .path()
         .app_data_dir()
@@ -251,24 +292,13 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
         .join("recordings");
     std::fs::create_dir_all(&rec_dir)?;
 
-    for (i, code) in targets.iter().enumerate() {
-        let taxon = &taxa_by_code[code];
-        emit(app, "species", format!("{} ({}/{})", taxon.com_name, i + 1, total), i as i64, total);
-        let (bird_id, recs) = fetch_species(
-            app, db, &client, &xc_key, &rec_dir, taxon, &params.region,
-            params.quality.as_deref(), params.rec_type.as_deref(),
-            params.max_per_species, i as i64, total,
-        )
-        .await?;
-        recordings_added += recs;
-        match bird_id {
-            Some(id) => {
-                imported_bird_ids.push(id);
-                species_imported += 1;
-            }
-            None => species_skipped += 1,
-        }
-    }
+    let taxa: Vec<Taxon> = targets.iter().map(|c| taxa_by_code[c].clone()).collect();
+    let (imported_bird_ids, species_imported, species_skipped, recordings_added) = import_taxa(
+        app, db, &client, &xc_key, &rec_dir, &taxa, &params.region,
+        params.quality.as_deref(), params.rec_type.as_deref(), params.max_per_species,
+    )
+    .await?;
+    let total = taxa.len() as i64;
 
     let pack_id = if params.create_pack && !imported_bird_ids.is_empty() {
         let name = format!(
@@ -323,27 +353,11 @@ pub async fn import_species(
     std::fs::create_dir_all(&rec_dir)?;
 
     let total = taxa.len() as i64;
-    let mut species_imported = 0i64;
-    let mut species_skipped = 0i64;
-    let mut recordings_added = 0i64;
-    let mut imported_bird_ids: Vec<i64> = Vec::new();
-
-    for (i, taxon) in taxa.iter().enumerate() {
-        emit(app, "species", format!("{} ({}/{})", taxon.com_name, i + 1, total), i as i64, total);
-        let (bird_id, recs) = fetch_species(
-            app, db, &client, &xc_key, &rec_dir, taxon, "",
-            quality.as_deref(), rec_type.as_deref(), max_per_species.max(1), i as i64, total,
-        )
-        .await?;
-        recordings_added += recs;
-        match bird_id {
-            Some(id) => {
-                imported_bird_ids.push(id);
-                species_imported += 1;
-            }
-            None => species_skipped += 1,
-        }
-    }
+    let (imported_bird_ids, species_imported, species_skipped, recordings_added) = import_taxa(
+        app, db, &client, &xc_key, &rec_dir, &taxa, "",
+        quality.as_deref(), rec_type.as_deref(), max_per_species.max(1),
+    )
+    .await?;
 
     // Attach imported birds to the chosen packs.
     let mut pack_id = None;
@@ -437,23 +451,15 @@ pub async fn import_pack(
         taxonomy::ensure(db).await?; // make sure taxa_for can resolve the codes
         let taxa = taxonomy::taxa_for(db, &missing_codes).await?;
         skipped += missing_codes.len() as i64 - taxa.len() as i64; // unresolvable codes
-        let total = taxa.len() as i64;
-        for (i, taxon) in taxa.iter().enumerate() {
-            emit(app, "species", format!("{} ({}/{})", taxon.com_name, i + 1, total), i as i64, total);
-            let (bird_id, recs) = fetch_species(
-                app, db, &client, &xc_key, &rec_dir, taxon, "",
-                None, None, max_per_species.max(1), i as i64, total,
-            )
-            .await?;
-            recordings_added += recs;
-            match bird_id {
-                Some(id) => {
-                    bird_ids.push(id);
-                    downloaded_new += 1;
-                }
-                None => skipped += 1, // no audio available
-            }
-        }
+        let (new_ids, imported, no_audio, recs) = import_taxa(
+            app, db, &client, &xc_key, &rec_dir, &taxa, "",
+            None, None, max_per_species.max(1),
+        )
+        .await?;
+        bird_ids.extend(new_ids);
+        downloaded_new += imported;
+        skipped += no_audio; // species with no audio available
+        recordings_added += recs;
     }
 
     if bird_ids.is_empty() {
@@ -969,10 +975,87 @@ pub async fn delete_bird(app: &AppHandle, db: &Db, bird_id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Import a ranked list of taxa concurrently: up to `SPECIES_CONCURRENCY`
+/// species in flight at once, each fetching + downloading its recordings while
+/// the shared `Throttle` keeps XC API queries paced. Returns
+/// `(bird_ids_in_input_order, imported, skipped, recordings_added)`.
+#[allow(clippy::too_many_arguments)]
+async fn import_taxa(
+    app: &AppHandle,
+    db: &Db,
+    client: &reqwest::Client,
+    xc_key: &str,
+    rec_dir: &Path,
+    taxa: &[Taxon],
+    region: &str,
+    quality: Option<&str>,
+    rec_type: Option<&str>,
+    max_per_species: i64,
+) -> Result<(Vec<i64>, i64, i64, i64)> {
+    let throttle = Throttle::new();
+    let total = taxa.len() as i64;
+
+    // Launch one species task. Clones everything it needs so the future is
+    // 'static (spawnable); returns its input index so results stay ordered.
+    let launch = |set: &mut JoinSet<Result<(usize, Option<i64>, i64)>>, i: usize, taxon: Taxon| {
+        let (app, db, client) = (app.clone(), db.clone(), client.clone());
+        let xc_key = xc_key.to_string();
+        let rec_dir = rec_dir.to_path_buf();
+        let region = region.to_string();
+        let quality = quality.map(str::to_string);
+        let rec_type = rec_type.map(str::to_string);
+        let throttle = throttle.clone();
+        set.spawn(async move {
+            let (bird_id, recs) = fetch_species(
+                &app, &db, &client, &xc_key, &rec_dir, &taxon, &region,
+                quality.as_deref(), rec_type.as_deref(), max_per_species, i as i64, total, &throttle,
+            )
+            .await?;
+            Ok((i, bird_id, recs))
+        });
+    };
+
+    let mut set: JoinSet<Result<(usize, Option<i64>, i64)>> = JoinSet::new();
+    let mut pending = taxa.iter().cloned().enumerate();
+    for (i, taxon) in pending.by_ref().take(SPECIES_CONCURRENCY) {
+        launch(&mut set, i, taxon);
+    }
+
+    let mut slots: Vec<Option<i64>> = vec![None; taxa.len()];
+    let mut skipped = 0i64;
+    let mut recordings_added = 0i64;
+    let mut done = 0i64;
+    while let Some(res) = set.join_next().await {
+        // A task's own Result: propagate a hard error (DB failure etc.) rather
+        // than silently dropping species; a join panic counts as a skip.
+        match res {
+            Ok(Ok((i, bird_id, recs))) => {
+                recordings_added += recs;
+                match bird_id {
+                    Some(id) => slots[i] = Some(id),
+                    None => skipped += 1,
+                }
+            }
+            Ok(Err(e)) => return Err(e),
+            Err(_) => skipped += 1,
+        }
+        done += 1;
+        emit(app, "species", format!("{}/{} species", done, total), done, total);
+        if let Some((i, taxon)) = pending.next() {
+            launch(&mut set, i, taxon);
+        }
+    }
+
+    let bird_ids: Vec<i64> = slots.into_iter().flatten().collect();
+    let imported = bird_ids.len() as i64;
+    Ok((bird_ids, imported, skipped, recordings_added))
+}
+
 /// Fetch one species' Xeno-Canto audio, download up to `max_per_species` clips,
 /// and upsert the bird + recordings. Returns `(Some(bird_id), n)` if any audio
-/// was found (bird stored even if a download fails), else `(None, 0)`. Paces
-/// itself for the XC rate limit. `idx`/`total` drive the progress display only.
+/// was found (bird stored even if a download fails), else `(None, 0)`. The XC
+/// API query is spaced by the shared `Throttle`; downloads run concurrently
+/// under its download semaphore. `idx`/`total` drive the progress display only.
 #[allow(clippy::too_many_arguments)]
 async fn fetch_species(
     app: &AppHandle,
@@ -987,6 +1070,7 @@ async fn fetch_species(
     max_per_species: i64,
     idx: i64,
     total: i64,
+    throttle: &Throttle,
 ) -> Result<(Option<i64>, i64)> {
     // XC v3 query. v3 requires tagged terms — a bare "Genus species" errors;
     // the species is given via the sp: tag with the full binomial quoted.
@@ -997,6 +1081,9 @@ async fn fetch_species(
     if let Some(t) = rec_type.filter(|s| !s.is_empty()) {
         query.push_str(&format!(" type:{}", t));
     }
+
+    // Pace the rate-limited API query (shared across concurrent species tasks).
+    throttle.api_slot().await;
 
     // Fetch as text first so we can surface exactly what XC returned when
     // parsing or the query is off (v3 shape/syntax diagnostics).
@@ -1026,41 +1113,52 @@ async fn fetch_species(
         }
     };
 
-    let picks: Vec<&XcRecording> = xc
+    let picks: Vec<XcRecording> = xc
         .recordings
-        .iter()
+        .into_iter()
         .filter(|r| !r.file.is_empty())
         .take(max_per_species.max(1) as usize)
         .collect();
 
     if picks.is_empty() {
-        tokio::time::sleep(Duration::from_millis(400)).await;
         return Ok((None, 0));
     }
 
     let bird_id = upsert_bird(db, taxon, region).await?;
-    let mut recs = 0i64;
-    for r in picks {
-        let file_url = if r.file.starts_with("//") {
-            format!("https:{}", r.file)
-        } else {
-            r.file.clone()
-        };
-        let filename = recording_file_name(&r.id, &r.file_name);
-        emit(app, "downloading", format!("↓ {} — XC{}", taxon.com_name, r.id), idx, total);
 
-        match download_to(client, xc_key, &file_url, &rec_dir.join(&filename)).await {
-            Ok(()) => {
-                insert_recording(db, bird_id, &filename, r).await?;
+    // Download this species' picks concurrently (media CDN, bounded by the
+    // shared download semaphore); insert the successes into the DB afterwards.
+    emit(app, "downloading", format!("↓ {} ({} recs)", taxon.com_name, picks.len()), idx, total);
+    let mut dl: JoinSet<std::result::Result<(String, XcRecording), (String, String)>> = JoinSet::new();
+    for r in picks {
+        let file_url = xc_file_url(&r.file);
+        let filename = recording_file_name(&r.id, &r.file_name);
+        let dest = rec_dir.join(&filename);
+        let (client, xc_key) = (client.clone(), xc_key.to_string());
+        let sem = throttle.downloads.clone();
+        dl.spawn(async move {
+            let _permit = sem.acquire_owned().await;
+            match download_to(&client, &xc_key, &file_url, &dest).await {
+                Ok(()) => Ok((filename, r)),
+                Err(e) => Err((r.id, e.to_string())),
+            }
+        });
+    }
+
+    let mut recs = 0i64;
+    while let Some(res) = dl.join_next().await {
+        match res {
+            Ok(Ok((filename, r))) => {
+                insert_recording(db, bird_id, &filename, &r).await?;
                 recs += 1;
             }
-            Err(e) => {
-                emit(app, "downloading", format!("skip XC{}: {}", r.id, e), idx, total);
+            Ok(Err((id, e))) => {
+                emit(app, "downloading", format!("skip XC{}: {}", id, e), idx, total);
             }
+            Err(_) => {} // download task panicked — treat as a skipped clip
         }
     }
 
-    tokio::time::sleep(Duration::from_millis(1000)).await; // XC rate limit
     Ok((Some(bird_id), recs))
 }
 

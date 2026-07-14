@@ -1,6 +1,9 @@
-use sqlx::sqlite::{SqlitePoolOptions, SqlitePool, SqliteConnectOptions};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
+};
 use std::fs;
 use std::str::FromStr;
+use std::time::Duration;
 use tauri::Manager;
 
 // anyhow makes error handling easier
@@ -26,9 +29,14 @@ pub async fn init_db(app_handle: &tauri::AppHandle) -> Result<Db> {
     println!("Database path: {}", db_url);
 
     // Connection options
+    // WAL + a busy timeout let the concurrent import writers (multiple species
+    // downloaded in parallel) share the DB without hitting "database is locked".
     let opts = SqliteConnectOptions::from_str(&db_url)
         .map_err(|e| anyhow!("Failed to create connection options: {}", e))?
-        .create_if_missing(true); // Create the database file if it doesn't exist
+        .create_if_missing(true) // Create the database file if it doesn't exist
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .busy_timeout(Duration::from_secs(30));
     
     // Build the database pool
     let pool = SqlitePoolOptions::new()
