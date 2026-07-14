@@ -23,6 +23,10 @@ jobs:
       SQLX_OFFLINE: 'true'
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history + tags so the changelog step can diff against the
+          # previous release tag.
+          fetch-depth: 0
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -46,6 +50,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Build the release notes from commit subjects since the previous tag.
+      # These land in both the GitHub release body and `latest.json` (what the
+      # in-app updater shows), so they must be generated at build time.
+      - name: Generate release notes
+        id: notes
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $prev = git describe --tags --abbrev=0 "HEAD^" 2>$null
+          if ($LASTEXITCODE -eq 0 -and $prev) {
+            $log = git log "$prev..HEAD" --no-merges --pretty="- %s"
+          } else {
+            $log = git log --no-merges --pretty="- %s"
+          }
+          if (-not $log) { $log = "- Maintenance release." }
+          $delim = "EOF_" + [System.Guid]::NewGuid().ToString("N")
+          "body<<$delim" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $log           | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "$delim"       | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Build app + installer
         id: tauri
         uses: tauri-apps/tauri-action@v0
@@ -65,8 +89,11 @@ jobs:
           releaseName: Birdet ${{ github.ref_name }}
           releaseDraft: true
           releaseBody: |
-            Windows beta build.
+            ## What's changed
 
+            ${{ steps.notes.outputs.body }}
+
+            ---
             The installer is unsigned, so Windows SmartScreen will warn on first
             run — click **More info → Run anyway**.
 
