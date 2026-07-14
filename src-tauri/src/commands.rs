@@ -257,6 +257,63 @@ pub async fn backfill_recording_meta(state: State<'_, AppState>) -> Result<i64, 
         .map_err(|e| e.to_string())
 }
 
+/// Total disk usage of downloaded recordings.
+#[derive(Serialize)]
+pub struct RecordingStorage {
+    pub bytes: u64,
+    pub file_count: u64,
+    pub path: String,
+}
+
+/// Sum the size of every downloaded recording in the writable app-data dir.
+/// Bundled seed audio (read-only resources) isn't counted — it isn't user data.
+#[tauri::command]
+pub fn recordings_storage(app: AppHandle) -> Result<RecordingStorage, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("recordings");
+    let (mut bytes, mut file_count) = (0u64, 0u64);
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() {
+                    bytes += meta.len();
+                    file_count += 1;
+                }
+            }
+        }
+    }
+    Ok(RecordingStorage { bytes, file_count, path: dir.to_string_lossy().into_owned() })
+}
+
+/// Open the recordings folder in the OS file manager. Creates it first so the
+/// action works even before the first import.
+#[tauri::command]
+pub fn open_recordings_folder(app: AppHandle) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("recordings");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    let mut cmd = std::process::Command::new("explorer");
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+
+    // explorer.exe returns a non-zero exit code even on success, so only report a
+    // failure to *launch* the command, not its exit status.
+    cmd.arg(&dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Couldn't open the folder: {}", e))
+}
+
 /// Re-download any XC recordings whose local audio file is missing or corrupt.
 #[tauri::command]
 pub async fn repair_recordings(

@@ -66,6 +66,19 @@ export async function backfillRecordingMeta(): Promise<number> {
     return await invoke<number>('backfill_recording_meta');
 }
 
+// Mirrors Rust `commands::RecordingStorage`.
+export type RecordingStorage = { bytes: number; file_count: number; path: string };
+
+// Total disk usage of downloaded recordings (excludes bundled seed audio).
+export async function recordingsStorage(): Promise<RecordingStorage> {
+    return await invoke<RecordingStorage>('recordings_storage');
+}
+
+// Open the recordings folder in the OS file manager.
+export async function openRecordingsFolder(): Promise<void> {
+    await invoke('open_recordings_folder');
+}
+
 export type RepairSummary = { checked: number; repaired: number; failed: number };
 
 // Re-download any Xeno-Canto recordings whose local audio file is missing or corrupt.

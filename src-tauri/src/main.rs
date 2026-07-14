@@ -61,6 +61,8 @@ fn main() -> anyhow::Result<()> {
             commands::add_bird_recordings,
             commands::backfill_recording_meta,
             commands::repair_recordings,
+            commands::recordings_storage,
+            commands::open_recordings_folder,
             commands::get_queue_counts,
             commands::create_pack,
             commands::create_pack_from_filter,

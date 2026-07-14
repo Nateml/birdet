@@ -2,6 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { getPacks, getBirds, getBirdPacks, importPack, type PackDto, type BirdListItem } from '$lib/api/packs';
+	import { recordingsStorage, openRecordingsFolder, type RecordingStorage } from '$lib/api/recordings';
 	import { runImportJob, importJob } from '$lib/stores/importJob';
 	import PackEditor from '$lib/components/PackEditor.svelte';
 	import BirdDetail from '$lib/components/BirdDetail.svelte';
@@ -35,6 +36,23 @@
 	let error = $state<string | null>(null);
 	let loading = $state(true);
 	let query = $state('');
+	let storage = $state<RecordingStorage | null>(null);
+
+	function fmtSize(bytes: number): string {
+		if (bytes < 1024) return `${bytes} B`;
+		const kb = bytes / 1024;
+		if (kb < 1024) return `${Math.round(kb)} KB`;
+		const mb = kb / 1024;
+		return mb < 1024 ? `${mb.toFixed(1)} MB` : `${(mb / 1024).toFixed(2)} GB`;
+	}
+
+	async function openFolder() {
+		try {
+			await openRecordingsFolder();
+		} catch (e) {
+			error = (e as string) ?? 'Could not open the folder.';
+		}
+	}
 
 	const EMOJI = ['🏡', '🌿', '🌊', '🦅', '🐦', '🦉', '🕊️', '🐤'];
 
@@ -54,6 +72,11 @@
 			map.set(t.bird_id, list);
 		}
 		birdPacks = map;
+		try {
+			storage = await recordingsStorage();
+		} catch {
+			// non-fatal: the size readout is optional
+		}
 	}
 
 	onMount(async () => {
@@ -272,6 +295,23 @@
 						{/each}
 					{/if}
 				</div>
+
+				<!-- Storage footer -->
+				{#if storage}
+					<div class="flex items-center justify-between gap-2 border-t border-be-border px-3 py-2">
+						<span class="font-be-mono text-[11px] text-be-muted-fg" title="{storage.file_count} files in {storage.path}">
+							{fmtSize(storage.bytes)} · {storage.file_count} recording{storage.file_count === 1 ? '' : 's'}
+						</span>
+						<button
+							onclick={openFolder}
+							title="Open the recordings folder"
+							class="flex shrink-0 items-center gap-1.5 rounded-md border border-be-border px-2 py-1 text-[11px] text-be-muted-fg transition-colors hover:bg-be-secondary hover:text-be-fg"
+						>
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+							Open folder
+						</button>
+					</div>
+				{/if}
 			</div>
 
 			<!-- Detail pane -->
