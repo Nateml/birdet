@@ -7,10 +7,16 @@
     import ImportIndicator from '$lib/components/ImportIndicator.svelte';
     import Sidebar from '$lib/components/Sidebar.svelte';
     import CommandPalette from '$lib/components/CommandPalette.svelte';
-	
+    import UpdateBanner from '$lib/components/UpdateBanner.svelte';
+    import { checkForUpdate } from '$lib/stores/updater';
+
 	let { children } = $props();
 
     onMount(initTheme);
+
+    // Silently check GitHub for a newer release on launch; the banner surfaces
+    // it if found. Quiet on failure (dev builds without a pubkey, or no network).
+    onMount(() => void checkForUpdate({ silent: true }));
 
     // Dev-only zoom: WSLg renders the webview small, so bump it while developing.
     // `import.meta.env.DEV` is false in production builds, so this never ships.
@@ -68,6 +74,9 @@
 
 <ImportIndicator />
 <CommandPalette />
+{#if !isTraining}
+    <UpdateBanner />
+{/if}
 
 {#if isTraining}
     <div class="h-dvh overflow-y-auto bg-be-bg text-be-fg font-be-sans">

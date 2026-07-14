@@ -23,6 +23,8 @@ fn main() -> anyhow::Result<()> {
     dotenv().ok();
     // Initialize the database
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // clone a handle to move to async task
             let handle = app.handle();
