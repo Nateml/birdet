@@ -18,9 +18,10 @@ const XC_BASE: &str = "https://xeno-canto.org/api/3/recordings";
 /// are still spaced by `Throttle` regardless, so this only overlaps the
 /// download + DB work between species.
 const SPECIES_CONCURRENCY: usize = 4;
-/// Ceiling on in-flight media downloads across the whole run (CDN host, not the
-/// rate-limited API), so a large `max_per_species` can't fan out unbounded.
-const DOWNLOAD_CONCURRENCY: usize = 8;
+/// Ceiling on in-flight media downloads across the whole run. Kept modest: the
+/// XC download host answers 503 when hit with too large a burst, so this trades
+/// a little speed for far fewer transient failures.
+const DOWNLOAD_CONCURRENCY: usize = 4;
 /// Minimum spacing between Xeno-Canto *API* queries (the rate-limited endpoint).
 const XC_API_MIN_INTERVAL: Duration = Duration::from_millis(300);
 
@@ -1299,6 +1300,21 @@ async fn fetch_species(
     Ok((Some(bird_id), recs))
 }
 
+/// Is this status worth retrying? XC's download host answers 503/502/504 under
+/// load and 429 when throttling — all transient. 4xx (except 429) is not.
+fn is_transient(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+}
+
+/// Honour a `Retry-After` header (seconds), clamped to a sane range.
+fn retry_after(resp: &reqwest::Response) -> Option<Duration> {
+    resp.headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(|s| Duration::from_secs(s.clamp(1, 10)))
+}
+
 async fn download_to(
     client: &reqwest::Client,
     xc_key: &str,
@@ -1306,11 +1322,37 @@ async fn download_to(
     dest: &std::path::Path,
 ) -> Result<()> {
     let sep = if url.contains('?') { '&' } else { '?' };
-    let resp = client
-        .get(format!("{}{}key={}", url, sep, enc(xc_key)))
-        .send()
-        .await?
-        .error_for_status()?;
+    let full = format!("{}{}key={}", url, sep, enc(xc_key));
+
+    // Retry transient failures (503/502/504/429 or a dropped connection) with
+    // Retry-After or exponential backoff, so a momentarily busy XC download host
+    // doesn't permanently skip an otherwise-good recording.
+    const MAX_TRIES: u32 = 4;
+    let mut resp = None;
+    let mut last: Option<anyhow::Error> = None;
+    for attempt in 0..MAX_TRIES {
+        let is_last = attempt + 1 == MAX_TRIES;
+        match client.get(&full).send().await {
+            Ok(r) if r.status().is_success() => {
+                resp = Some(r);
+                break;
+            }
+            Ok(r) if is_transient(r.status()) && !is_last => {
+                let wait = retry_after(&r).unwrap_or_else(|| Duration::from_millis(500 * (1 << attempt)));
+                last = Some(anyhow!("HTTP {}", r.status()));
+                tokio::time::sleep(wait).await;
+            }
+            // Non-transient status (404 etc.), or transient but out of tries.
+            Ok(r) => return Err(r.error_for_status().expect_err("non-success").into()),
+            Err(e) if !is_last => {
+                last = Some(e.into());
+                tokio::time::sleep(Duration::from_millis(500 * (1 << attempt))).await;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    let resp = resp.ok_or_else(|| last.unwrap_or_else(|| anyhow!("download failed")))?;
+
     // Reject a non-audio body: XC occasionally answers a 200 with an HTML/JSON
     // error page instead of the file. Saving that as `.mp3` yields a "recording"
     // that later fails to decode ("format not supported"/0:00). Bail early.
