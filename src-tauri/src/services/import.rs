@@ -481,6 +481,143 @@ pub async fn import_pack(
     })
 }
 
+/// Species resolved from a pasted eBird list (URL or CSV), for the import
+/// preview. `source` describes what was recognised; `unresolved` lists CSV names
+/// that matched no eBird species (hybrids, "sp." entries, typos).
+#[derive(Serialize, Clone)]
+pub struct ListPreview {
+    pub source: String,
+    pub species: Vec<taxonomy::SpeciesLite>,
+    pub unresolved: Vec<String>,
+}
+
+/// Extract an eBird checklist submission id (`S…`) from a URL or bare code.
+fn extract_checklist_id(s: &str) -> Option<String> {
+    let grab = |seg: &str| {
+        seg.chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect::<String>()
+    };
+    if let Some(idx) = s.find("/checklist/") {
+        let code = grab(&s[idx + "/checklist/".len()..]);
+        if code.starts_with('S') && code.len() > 1 {
+            return Some(code);
+        }
+    }
+    let t = s.trim();
+    if t.len() > 1 && t.starts_with('S') && t[1..].chars().all(|c| c.is_ascii_digit()) {
+        return Some(t.to_string());
+    }
+    None
+}
+
+/// Extract an eBird region or hotspot code from a URL or bare code. Hotspots
+/// (`L…`) and region codes (`US`, `GB-ENG`, `US-NY-109`) both work with spplist.
+fn extract_region_code(s: &str) -> Option<String> {
+    let grab = |seg: &str| {
+        seg.chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect::<String>()
+    };
+    for marker in ["/hotspot/", "/region/"] {
+        if let Some(idx) = s.find(marker) {
+            let code = grab(&s[idx + marker.len()..]);
+            if !code.is_empty() {
+                return Some(code);
+            }
+        }
+    }
+    // A bare single token: L-hotspot or an uppercase region code.
+    let t = s.trim();
+    let is_token = !t.is_empty() && !t.contains(char::is_whitespace);
+    if is_token {
+        if t.starts_with('L') && t[1..].chars().all(|c| c.is_ascii_digit()) && t.len() > 1 {
+            return Some(t.to_string());
+        }
+        if t.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-')
+            && t.chars().any(|c| c.is_ascii_uppercase())
+        {
+            return Some(t.to_string());
+        }
+    }
+    None
+}
+
+/// Pull species names out of a CSV blob (an eBird life-list / My-Data export) or,
+/// failing a recognisable header, treat each line as a name. Prefers the
+/// Scientific Name column, falling back to Common Name.
+fn extract_csv_names(blob: &str) -> Vec<String> {
+    let mut rdr = csv::ReaderBuilder::new().flexible(true).from_reader(blob.as_bytes());
+    if let Ok(headers) = rdr.headers().cloned() {
+        let find = |want: &str| {
+            headers.iter().position(|h| h.trim().eq_ignore_ascii_case(want))
+        };
+        let col = find("Scientific Name").or_else(|| find("Common Name"));
+        if let Some(col) = col {
+            let mut out = Vec::new();
+            for rec in rdr.records().flatten() {
+                if let Some(v) = rec.get(col) {
+                    let v = v.trim();
+                    if !v.is_empty() {
+                        out.push(v.to_string());
+                    }
+                }
+            }
+            return out;
+        }
+    }
+    // No eBird header — one name per line.
+    blob.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Resolve a pasted eBird list (checklist URL, hotspot/region URL or code, or a
+/// life-list / My-Data CSV) into the species it contains, without downloading
+/// anything. The frontend previews the result, then imports via `import_species`
+/// with the returned eBird codes.
+pub async fn resolve_ebird_list(db: &Db, input: &str) -> Result<ListPreview> {
+    let t = input.trim();
+    if t.is_empty() {
+        return Err(anyhow!("Nothing to import — paste an eBird list URL or a CSV export."));
+    }
+
+    if let Some(sub_id) = extract_checklist_id(t) {
+        let key = regions::ebird_key(db).await?;
+        let client = regions::build_client()?;
+        let codes = regions::checklist_species(&client, &key, &sub_id).await;
+        if codes.is_empty() {
+            return Err(anyhow!("No species found on checklist {} (is it public?).", sub_id));
+        }
+        let species = taxonomy::species_lite_for(db, &codes).await?;
+        return Ok(ListPreview { source: format!("Checklist {}", sub_id), species, unresolved: vec![] });
+    }
+
+    if let Some(code) = extract_region_code(t) {
+        let key = regions::ebird_key(db).await?;
+        let client = regions::build_client()?;
+        let codes = regions::fetch_spplist(&client, &key, &code).await?;
+        if codes.is_empty() {
+            return Err(anyhow!("No species found for {}.", code));
+        }
+        let species = taxonomy::species_lite_for(db, &codes).await?;
+        return Ok(ListPreview { source: format!("Region {}", code), species, unresolved: vec![] });
+    }
+
+    // Otherwise treat the input as a CSV / newline-separated name list.
+    let names = extract_csv_names(t);
+    if names.is_empty() {
+        return Err(anyhow!("Couldn't find any species names — expected an eBird CSV or a URL."));
+    }
+    let (species, unresolved) = taxonomy::resolve_names(db, &names).await?;
+    if species.is_empty() {
+        return Err(anyhow!("None of the {} names matched an eBird species.", names.len()));
+    }
+    Ok(ListPreview { source: "Pasted list".to_string(), species, unresolved })
+}
+
 /// Query Xeno-Canto for a species (by scientific name) and return the raw
 /// recording list. Silent (no progress events) — used by the per-bird
 /// recording browser. Tolerant: returns [] on any request/parse error.
@@ -1253,6 +1390,44 @@ async fn upsert_bird(db: &Db, taxon: &Taxon, region: &str) -> Result<i64> {
     .await?;
 
     Ok(bird_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checklist_id_from_url_and_bare() {
+        assert_eq!(extract_checklist_id("https://ebird.org/checklist/S123456789").as_deref(), Some("S123456789"));
+        assert_eq!(extract_checklist_id("https://ebird.org/checklist/S99?foo=1").as_deref(), Some("S99"));
+        assert_eq!(extract_checklist_id("S42").as_deref(), Some("S42"));
+        assert_eq!(extract_checklist_id("Setophaga"), None); // not a checklist code
+        assert_eq!(extract_checklist_id("https://ebird.org/region/US"), None);
+    }
+
+    #[test]
+    fn region_and_hotspot_codes() {
+        assert_eq!(extract_region_code("https://ebird.org/hotspot/L99381").as_deref(), Some("L99381"));
+        assert_eq!(extract_region_code("https://ebird.org/region/GB-ENG?season=all").as_deref(), Some("GB-ENG"));
+        assert_eq!(extract_region_code("US-NY-109").as_deref(), Some("US-NY-109"));
+        assert_eq!(extract_region_code("L12345").as_deref(), Some("L12345"));
+        assert_eq!(extract_region_code("Turdus migratorius"), None); // has a space
+    }
+
+    #[test]
+    fn csv_prefers_scientific_name_and_falls_back_to_lines() {
+        // eBird life-list style CSV.
+        let csv = "Common Name,Scientific Name,Count\nMallard,Anas platyrhynchos,3\nRobin,Turdus migratorius,1\n";
+        assert_eq!(extract_csv_names(csv), vec!["Anas platyrhynchos", "Turdus migratorius"]);
+
+        // Only a common-name column present.
+        let csv2 = "Row,Common Name\n1,Mallard\n2,Robin\n";
+        assert_eq!(extract_csv_names(csv2), vec!["Mallard", "Robin"]);
+
+        // No recognizable header — one name per line.
+        let plain = "Anas platyrhynchos\nTurdus migratorius\n";
+        assert_eq!(extract_csv_names(plain), vec!["Anas platyrhynchos", "Turdus migratorius"]);
+    }
 }
 
 async fn insert_recording(db: &Db, bird_id: i64, filename: &str, r: &XcRecording) -> Result<()> {

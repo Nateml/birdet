@@ -68,6 +68,7 @@ fn main() -> anyhow::Result<()> {
             commands::import_birds,
             commands::search_species,
             commands::import_species,
+            commands::resolve_ebird_list,
             commands::get_pack_birds,
             commands::rename_pack,
             commands::delete_pack,

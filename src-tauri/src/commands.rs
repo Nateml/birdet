@@ -485,6 +485,19 @@ pub async fn import_species(
     .map_err(|e| e.to_string())
 }
 
+/// Resolve a pasted eBird list (checklist/hotspot/region URL or code, or a
+/// life-list / My-Data CSV) into its species, for the import preview. No
+/// download happens here — the frontend imports the codes via `import_species`.
+#[tauri::command]
+pub async fn resolve_ebird_list(
+    state: State<'_, AppState>,
+    input: String,
+) -> Result<crate::services::import::ListPreview, String> {
+    crate::services::import::resolve_ebird_list(&state.db, &input)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Serialize)]
 pub struct BirdStat {
     pub common_name: String,

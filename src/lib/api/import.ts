@@ -63,6 +63,25 @@ export async function importSpecies(opts: {
     });
 }
 
+// One resolved species from a pasted eBird list. Mirrors Rust `SpeciesLite`.
+export type SpeciesLite = {
+    ebird_code: string;
+    common_name: string;
+};
+
+// Mirrors Rust `services::import::ListPreview`.
+export type ListPreview = {
+    source: string;
+    species: SpeciesLite[];
+    unresolved: string[];
+};
+
+// Resolve a pasted eBird list (checklist/hotspot/region URL or code, or a
+// life-list / My-Data CSV) into its species — no download yet.
+export async function resolveEbirdList(input: string): Promise<ListPreview> {
+    return await invoke<ListPreview>('resolve_ebird_list', { input });
+}
+
 export function onImportProgress(cb: (p: ImportProgress) => void): Promise<UnlistenFn> {
     return listen<ImportProgress>('import://progress', (e) => cb(e.payload));
 }

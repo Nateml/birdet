@@ -6,16 +6,18 @@
 		importBirds,
 		importSpecies,
 		searchSpecies,
+		resolveEbirdList,
 		onImportProgress,
 		type ImportProgress,
 		type ImportSummary,
-		type SpeciesResult
+		type SpeciesResult,
+		type ListPreview
 	} from '$lib/api/import';
 	import { getSetting, SETTING_EBIRD_KEY, SETTING_XC_KEY } from '$lib/api/settings';
 	import { getPacks, type PackDto } from '$lib/api/packs';
 	import { runImportJob, importJob } from '$lib/stores/importJob';
 
-	type Mode = 'region' | 'search';
+	type Mode = 'region' | 'search' | 'list';
 	let mode = $state<Mode>('region');
 
 	// Region form state
@@ -36,10 +38,18 @@
 	let selected = $state<SpeciesResult[]>([]);
 	let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-	// Pack targeting (search mode)
+	// Pack targeting (search + list modes)
 	let packs = $state<PackDto[]>([]);
 	let packTargets = $state<Set<string>>(new Set());
 	let newPackName = $state('');
+
+	// List-import state
+	let listInput = $state('');
+	let listPreview = $state<ListPreview | null>(null);
+	let resolving = $state(false);
+	let listError = $state<string | null>(null);
+	let showUnresolved = $state(false);
+	let csvInput = $state<HTMLInputElement>();
 
 	// Run state (shared)
 	let running = $state(false);
@@ -166,6 +176,66 @@
 		}
 	}
 
+	// --- List import (life list / eBird URL / CSV) ---
+	async function resolveList() {
+		const input = listInput.trim();
+		if (!input || resolving) return;
+		resolving = true;
+		listError = null;
+		listPreview = null;
+		showUnresolved = false;
+		try {
+			listPreview = await resolveEbirdList(input);
+		} catch (e) {
+			listError = (e as string) ?? 'Could not read that list.';
+		} finally {
+			resolving = false;
+		}
+	}
+
+	async function onCsvFile(e: Event) {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (!file) return;
+		try {
+			listInput = await file.text();
+			await resolveList();
+		} catch {
+			listError = 'Could not read that file.';
+		} finally {
+			if (csvInput) csvInput.value = ''; // allow re-selecting the same file
+		}
+	}
+
+	async function runList() {
+		if (!listPreview || listPreview.species.length === 0 || running || $importJob.active) return;
+		resetRun();
+		try {
+			summary = await runImportJob(listPreview.source || 'list', () =>
+				importSpecies({
+					ebirdCodes: listPreview!.species.map((s) => s.ebird_code),
+					quality: quality || null,
+					recType: recType || null,
+					maxPerSpecies: Math.max(1, Math.round(maxPerSpecies) || 1),
+					packIds: [...packTargets],
+					newPackName: newPackName.trim() || null
+				})
+			);
+			listPreview = null;
+			listInput = '';
+			newPackName = '';
+			packTargets = new Set();
+			try {
+				packs = await getPacks();
+			} catch {
+				// ignore
+			}
+		} catch (e) {
+			error = (e as string) ?? 'Import failed.';
+		} finally {
+			running = false;
+		}
+	}
+
 	const pctDone = $derived(progress.total ? (progress.current / progress.total) * 100 : 0);
 </script>
 
@@ -191,6 +261,12 @@
 			class="rounded-md px-4 py-1.5 text-sm font-medium transition-colors {mode === 'search'
 				? 'bg-be-secondary text-be-fg'
 				: 'text-be-muted-fg'}">Search species</button
+		>
+		<button
+			onclick={() => (mode = 'list')}
+			class="rounded-md px-4 py-1.5 text-sm font-medium transition-colors {mode === 'list'
+				? 'bg-be-secondary text-be-fg'
+				: 'text-be-muted-fg'}">From a list</button
 		>
 	</div>
 
@@ -261,7 +337,7 @@
 				{running ? 'Importing…' : 'Import'}
 			</button>
 		</div>
-	{:else}
+	{:else if mode === 'search'}
 		<div class="rounded-xl border border-be-border bg-be-card p-6">
 			<label class="block">
 				<span class="mb-1.5 block text-sm font-medium">Search species</span>
@@ -367,6 +443,131 @@
 			>
 				{running ? 'Adding…' : selected.length ? `Add ${selected.length} ${selected.length === 1 ? 'bird' : 'birds'}` : 'Add birds'}
 			</button>
+		</div>
+	{:else}
+		<div class="rounded-xl border border-be-border bg-be-card p-6">
+			<span class="mb-1.5 block text-sm font-medium">Paste an eBird list</span>
+			<p class="mb-3 text-xs leading-relaxed text-be-muted-fg">
+				Works with an eBird <strong>checklist</strong>, <strong>hotspot</strong>, or
+				<strong>region</strong> URL — or your own <strong>life list</strong>. For a life list, open it
+				on eBird, hit <em>Download (CSV)</em>, then paste the file below or choose it. Species you
+				already have are skipped automatically.
+			</p>
+			<textarea
+				bind:value={listInput}
+				disabled={running || resolving}
+				rows="4"
+				placeholder="https://ebird.org/checklist/S123456789  ·  or paste CSV contents…"
+				class="w-full resize-y rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40"
+			></textarea>
+
+			<div class="mt-3 flex flex-wrap items-center gap-3">
+				<button
+					onclick={resolveList}
+					disabled={running || resolving || !listInput.trim() || !hasKeys}
+					class="rounded-lg bg-be-primary px-4 py-2 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50"
+				>
+					{resolving ? 'Reading…' : 'Read list'}
+				</button>
+				<button
+					onclick={() => csvInput?.click()}
+					disabled={running || resolving}
+					class="rounded-lg border border-be-border px-4 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
+				>
+					Choose CSV file…
+				</button>
+				<input
+					bind:this={csvInput}
+					onchange={onCsvFile}
+					type="file"
+					accept=".csv,text/csv"
+					class="hidden"
+				/>
+			</div>
+
+			{#if listError}
+				<p class="mt-3 rounded-lg border border-be-destructive/40 bg-be-destructive/10 px-3 py-2 text-sm text-be-destructive">
+					{listError}
+				</p>
+			{/if}
+
+			{#if listPreview}
+				<div class="mt-4 border-t border-be-border pt-4">
+					<p class="mb-2 text-sm">
+						<span class="font-be-mono text-xs uppercase tracking-widest text-be-muted-fg">{listPreview.source}</span>
+						<span class="ml-2 font-medium">{listPreview.species.length} species</span>
+						{#if listPreview.unresolved.length > 0}
+							<button onclick={() => (showUnresolved = !showUnresolved)}
+								class="ml-2 text-xs text-be-muted-fg underline">{listPreview.unresolved.length} unmatched</button>
+						{/if}
+					</p>
+					{#if showUnresolved && listPreview.unresolved.length > 0}
+						<p class="mb-2 rounded-lg bg-be-secondary/40 px-3 py-2 text-xs italic text-be-muted-fg">
+							Not eBird species (hybrids, “sp.” entries, or spelling): {listPreview.unresolved.join(', ')}
+						</p>
+					{/if}
+					<div class="max-h-52 space-y-0.5 overflow-y-auto rounded-lg border border-be-border p-2 text-sm">
+						{#each listPreview.species as s (s.ebird_code)}
+							<div class="truncate px-2 py-1">{s.common_name}</div>
+						{/each}
+					</div>
+				</div>
+
+				<div class="mt-4 grid grid-cols-3 gap-3">
+					<label class="block">
+						<span class="mb-1.5 block text-xs font-medium">Recs / species</span>
+						<input type="number" min="1" max="10" bind:value={maxPerSpecies} disabled={running}
+							class="w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40" />
+					</label>
+					<label class="block">
+						<span class="mb-1.5 block text-xs font-medium">Quality</span>
+						<select bind:value={quality} disabled={running}
+							class="w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40">
+							<option value="">Any</option>
+							<option value="A">A only</option>
+							<option value="B">B and above</option>
+						</select>
+					</label>
+					<label class="block">
+						<span class="mb-1.5 block text-xs font-medium">Type</span>
+						<select bind:value={recType} disabled={running}
+							class="w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40">
+							<option value="">Any</option>
+							<option value="song">Song</option>
+							<option value="call">Call</option>
+						</select>
+					</label>
+				</div>
+
+				<div class="mt-5 border-t border-be-border pt-4">
+					<span class="mb-1.5 block text-sm font-medium">Add to packs <span class="text-be-muted-fg">(optional)</span></span>
+					{#if packs.length > 0}
+						<div class="flex flex-wrap gap-1.5">
+							{#each packs as p (p.id)}
+								<button onclick={() => togglePack(p.id)} disabled={running}
+									class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors {packTargets.has(p.id)
+										? 'border-be-primary bg-be-primary/10 text-be-fg'
+										: 'border-be-border text-be-muted-fg hover:bg-be-secondary'}">
+									{#if packTargets.has(p.id)}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{/if}
+									{p.name}
+								</button>
+							{/each}
+						</div>
+					{:else}
+						<p class="text-xs text-be-muted-fg">No packs yet.</p>
+					{/if}
+					<input bind:value={newPackName} disabled={running} placeholder="…or new pack name"
+						class="mt-3 w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40" />
+				</div>
+
+				<button
+					onclick={runList}
+					disabled={running || $importJob.active || listPreview.species.length === 0 || !hasKeys}
+					class="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-be-primary px-5 py-2.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50"
+				>
+					{running ? 'Importing…' : `Import ${listPreview.species.length} ${listPreview.species.length === 1 ? 'bird' : 'birds'}`}
+				</button>
+			{/if}
 		</div>
 	{/if}
 

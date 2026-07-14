@@ -113,6 +113,81 @@ pub async fn search(db: &Db, query: &str, limit: i64) -> Result<Vec<SpeciesResul
         .collect())
 }
 
+/// A resolved species: its eBird code + common name, for import previews.
+#[derive(Serialize, Clone)]
+pub struct SpeciesLite {
+    pub ebird_code: String,
+    pub common_name: String,
+}
+
+/// Resolve free-text species names (as found in an eBird CSV export) to eBird
+/// codes against the cached taxonomy. Matches scientific name first, then common
+/// name — both case-insensitive and trimmed. Returns the matched species (deduped
+/// by code, in input order) and the names that resolved to nothing (hybrids,
+/// "sp." entries, typos). Populates the cache on first call.
+pub async fn resolve_names(
+    db: &Db,
+    names: &[String],
+) -> Result<(Vec<SpeciesLite>, Vec<String>)> {
+    ensure(db).await?;
+    let mut matched: Vec<SpeciesLite> = Vec::new();
+    let mut unresolved: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut queried: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for name in names {
+        let n = name.trim();
+        if n.is_empty() {
+            continue;
+        }
+        let key = n.to_lowercase();
+        // A "Download My Data" export repeats a species once per observation;
+        // resolve each distinct name only once.
+        if !queried.insert(key.clone()) {
+            continue;
+        }
+        let row = sqlx::query(
+            r#"SELECT ebird_code, common_name FROM taxonomy
+               WHERE lower(scientific_name) = ?1 OR lower(common_name) = ?1
+               LIMIT 1"#,
+        )
+        .bind(&key)
+        .fetch_optional(&db.0)
+        .await?;
+        match row {
+            Some(r) => {
+                let code: String = r.get("ebird_code");
+                if seen.insert(code.clone()) {
+                    matched.push(SpeciesLite { ebird_code: code, common_name: r.get("common_name") });
+                }
+            }
+            None => unresolved.push(n.to_string()),
+        }
+    }
+    Ok((matched, unresolved))
+}
+
+/// `SpeciesLite` for a list of eBird codes, preserving order, skipping unknowns.
+pub async fn species_lite_for(db: &Db, codes: &[String]) -> Result<Vec<SpeciesLite>> {
+    ensure(db).await?;
+    let mut out = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for code in codes {
+        if !seen.insert(code.clone()) {
+            continue;
+        }
+        if let Some(r) =
+            sqlx::query("SELECT ebird_code, common_name FROM taxonomy WHERE ebird_code = ?1")
+                .bind(code)
+                .fetch_optional(&db.0)
+                .await?
+        {
+            out.push(SpeciesLite { ebird_code: r.get("ebird_code"), common_name: r.get("common_name") });
+        }
+    }
+    Ok(out)
+}
+
 /// Load full `Taxon` records for the given eBird codes from the cache,
 /// preserving input order. Ensures the cache is populated first.
 pub async fn taxa_for(db: &Db, codes: &[String]) -> Result<Vec<Taxon>> {
