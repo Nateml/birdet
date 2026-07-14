@@ -243,7 +243,7 @@ pub async fn search_bird_recordings(
     bird_id: i64,
     quality: Option<String>,
     rec_type: Option<String>,
-) -> Result<Vec<crate::services::import::RecordingCandidate>, String> {
+) -> Result<crate::services::import::RecordingSearch, String> {
     crate::services::import::search_recordings(&state.db, bird_id, quality, rec_type)
         .await
         .map_err(|e| e.to_string())

@@ -637,6 +637,12 @@
 				{summary.species_imported} species · {summary.recordings_added} recordings
 				{#if summary.species_skipped > 0}<span class="text-be-muted-fg"> · {summary.species_skipped} skipped (no audio)</span>{/if}
 			</p>
+			{#if summary.name_mismatches?.length > 0}
+				<p class="mt-3 rounded-lg border border-be-accent/40 bg-be-accent/10 px-3 py-2 text-xs text-be-accent">
+					⚠ Matched by English name (eBird and Xeno-Canto use different scientific names) — verify these
+					are the right species: {summary.name_mismatches.join(', ')}
+				</p>
+			{/if}
 			<div class="mt-4 flex gap-3">
 				<a href="/library" class="rounded-lg border border-be-border px-4 py-2 text-sm transition-colors hover:bg-be-secondary">View library</a>
 				<a href="/" class="rounded-lg bg-be-primary px-4 py-2 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90">Start training</a>

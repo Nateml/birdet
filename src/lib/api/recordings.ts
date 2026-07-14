@@ -36,12 +36,21 @@ export async function deleteBird(birdId: number): Promise<void> {
     await invoke('delete_bird', { birdId });
 }
 
+// Mirrors Rust `import::RecordingSearch`.
+export type RecordingSearch = {
+    candidates: RecordingCandidate[];
+    // Results came from the English-name fallback, not the eBird scientific
+    // name — the recordings may be filed under a different species name.
+    name_fallback: boolean;
+    scientific_name: string;
+};
+
 export async function searchBirdRecordings(
     birdId: number,
     quality?: string,
     recType?: string
-): Promise<RecordingCandidate[]> {
-    return await invoke<RecordingCandidate[]>('search_bird_recordings', {
+): Promise<RecordingSearch> {
+    return await invoke<RecordingSearch>('search_bird_recordings', {
         birdId,
         quality,
         recType

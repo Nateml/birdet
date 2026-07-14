@@ -121,6 +121,10 @@ pub struct ImportSummary {
     pub species_skipped: i64,
     pub recordings_added: i64,
     pub pack_id: Option<String>,
+    /// Common names of species whose recordings came from the English-name
+    /// fallback (eBird↔XC scientific-name mismatch) — worth a user sanity-check.
+    #[serde(default)]
+    pub name_mismatches: Vec<String>,
 }
 
 fn emit(app: &AppHandle, stage: &str, message: impl Into<String>, current: i64, total: i64) {
@@ -319,11 +323,12 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
     std::fs::create_dir_all(&rec_dir)?;
 
     let taxa: Vec<Taxon> = targets.iter().map(|c| taxa_by_code[c].clone()).collect();
-    let (imported_bird_ids, species_imported, species_skipped, recordings_added) = import_taxa(
-        app, db, &client, &xc_key, &rec_dir, &taxa, &params.region,
-        params.quality.as_deref(), params.rec_type.as_deref(), params.max_per_species,
-    )
-    .await?;
+    let (imported_bird_ids, species_imported, species_skipped, recordings_added, name_mismatches) =
+        import_taxa(
+            app, db, &client, &xc_key, &rec_dir, &taxa, &params.region,
+            params.quality.as_deref(), params.rec_type.as_deref(), params.max_per_species,
+        )
+        .await?;
     let total = taxa.len() as i64;
 
     let pack_id = if params.create_pack && !imported_bird_ids.is_empty() {
@@ -337,7 +342,7 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
         None
     };
 
-    let summary = ImportSummary { species_imported, species_skipped, recordings_added, pack_id };
+    let summary = ImportSummary { species_imported, species_skipped, recordings_added, pack_id, name_mismatches };
     emit(
         app,
         "done",
@@ -379,11 +384,12 @@ pub async fn import_species(
     std::fs::create_dir_all(&rec_dir)?;
 
     let total = taxa.len() as i64;
-    let (imported_bird_ids, species_imported, species_skipped, recordings_added) = import_taxa(
-        app, db, &client, &xc_key, &rec_dir, &taxa, "",
-        quality.as_deref(), rec_type.as_deref(), max_per_species.max(1),
-    )
-    .await?;
+    let (imported_bird_ids, species_imported, species_skipped, recordings_added, name_mismatches) =
+        import_taxa(
+            app, db, &client, &xc_key, &rec_dir, &taxa, "",
+            quality.as_deref(), rec_type.as_deref(), max_per_species.max(1),
+        )
+        .await?;
 
     // Attach imported birds to the chosen packs.
     let mut pack_id = None;
@@ -405,7 +411,7 @@ pub async fn import_species(
         total,
         total,
     );
-    Ok(ImportSummary { species_imported, species_skipped, recordings_added, pack_id })
+    Ok(ImportSummary { species_imported, species_skipped, recordings_added, pack_id, name_mismatches })
 }
 
 /// Import a pack from an exported `birdet-pack` JSON file. Birds already in the
@@ -477,7 +483,7 @@ pub async fn import_pack(
         taxonomy::ensure(db).await?; // make sure taxa_for can resolve the codes
         let taxa = taxonomy::taxa_for(db, &missing_codes).await?;
         skipped += missing_codes.len() as i64 - taxa.len() as i64; // unresolvable codes
-        let (new_ids, imported, no_audio, recs) = import_taxa(
+        let (new_ids, imported, no_audio, recs, _mismatches) = import_taxa(
             app, db, &client, &xc_key, &rec_dir, &taxa, "",
             None, None, max_per_species.max(1),
         )
@@ -644,25 +650,23 @@ pub async fn resolve_ebird_list(db: &Db, input: &str) -> Result<ListPreview> {
     Ok(ListPreview { source: "Pasted list".to_string(), species, unresolved })
 }
 
-/// Query Xeno-Canto for a species (by scientific name) and return the raw
-/// recording list. Silent (no progress events) — used by the per-bird
-/// recording browser. Tolerant: returns [] on any request/parse error.
-async fn xc_recordings_for(
-    client: &reqwest::Client,
-    xc_key: &str,
-    sci_name: &str,
-    quality: Option<&str>,
-    rec_type: Option<&str>,
-) -> Vec<XcRecording> {
-    let mut query = format!("sp:\"{}\"", sci_name);
-    if let Some(q) = quality.filter(|s| !s.is_empty()) {
-        query.push_str(&format!(" q:{}", q));
+/// Build an XC v3 query from a base tag term plus optional quality/type filters.
+/// v3 requires tagged terms (a bare "Genus species" errors).
+fn xc_query(term: &str, quality: Option<&str>, rec_type: Option<&str>) -> String {
+    let mut q = term.to_string();
+    if let Some(v) = quality.filter(|s| !s.is_empty()) {
+        q.push_str(&format!(" q:{}", v));
     }
-    if let Some(t) = rec_type.filter(|s| !s.is_empty()) {
-        query.push_str(&format!(" type:{}", t));
+    if let Some(v) = rec_type.filter(|s| !s.is_empty()) {
+        q.push_str(&format!(" type:{}", v));
     }
+    q
+}
+
+/// Raw XC recordings for a prepared query string. Tolerant: [] on any error.
+async fn xc_fetch(client: &reqwest::Client, xc_key: &str, query: &str) -> Vec<XcRecording> {
     match client
-        .get(format!("{}?query={}&key={}", XC_BASE, enc(&query), enc(xc_key)))
+        .get(format!("{}?query={}&key={}", XC_BASE, enc(query), enc(xc_key)))
         .send()
         .await
     {
@@ -676,13 +680,92 @@ async fn xc_recordings_for(
     }
 }
 
-/// Look up a bird's scientific name.
-async fn bird_sci_name(db: &Db, bird_id: i64) -> Result<String> {
-    sqlx::query_scalar::<_, String>("SELECT scientific_name FROM birds WHERE id = ?1")
-        .bind(bird_id)
-        .fetch_optional(&db.0)
-        .await?
-        .ok_or_else(|| anyhow!("Bird {} not found.", bird_id))
+/// Like `xc_fetch` but emits an import progress line describing the XC response
+/// (status / recording count / query, or a parse snippet) — used on the noisy
+/// import path where v3 query/shape diagnostics are worth surfacing.
+async fn xc_fetch_diag(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    xc_key: &str,
+    query: &str,
+    idx: i64,
+    total: i64,
+) -> Vec<XcRecording> {
+    match client
+        .get(format!("{}?query={}&key={}", XC_BASE, enc(query), enc(xc_key)))
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            match serde_json::from_str::<XcResponse>(&body) {
+                Ok(x) => {
+                    emit(app, "downloading", format!("XC {} → {} recs [{}]", status.as_u16(), x.recordings.len(), query), idx, total);
+                    x.recordings
+                }
+                Err(e) => {
+                    let snippet: String = body.chars().take(400).collect();
+                    emit(app, "downloading", format!("XC {} parse-fail: {} | {}", status.as_u16(), e, snippet), idx, total);
+                    vec![]
+                }
+            }
+        }
+        Err(e) => {
+            emit(app, "downloading", format!("XC request error: {}", e), idx, total);
+            vec![]
+        }
+    }
+}
+
+/// Query Xeno-Canto for a species, trying the eBird scientific name first and
+/// falling back to the English/common name when that returns nothing — eBird
+/// (Clements taxonomy) and XC sometimes disagree on the binomial after a genus
+/// split/merge (e.g. eBird *Ardea ibis* vs XC *Bubulcus ibis* for Western Cattle
+/// Egret). The returned bool is `true` when the English fallback supplied the
+/// results, flagging a possible name mismatch the caller should surface.
+/// Silent (no progress events) — used by the per-bird recording browser.
+async fn xc_recordings_for(
+    client: &reqwest::Client,
+    xc_key: &str,
+    sci_name: &str,
+    com_name: Option<&str>,
+    quality: Option<&str>,
+    rec_type: Option<&str>,
+) -> (Vec<XcRecording>, bool) {
+    let by_sci = xc_fetch(client, xc_key, &xc_query(&format!("sp:\"{}\"", sci_name), quality, rec_type)).await;
+    if by_sci.iter().any(|r| !r.file.is_empty()) {
+        return (by_sci, false);
+    }
+    if let Some(com) = com_name.map(str::trim).filter(|s| !s.is_empty()) {
+        let by_en = xc_fetch(client, xc_key, &xc_query(&format!("en:\"{}\"", com), quality, rec_type)).await;
+        if by_en.iter().any(|r| !r.file.is_empty()) {
+            return (by_en, true);
+        }
+    }
+    (by_sci, false) // both empty — return the (empty) sci result, no fallback flag
+}
+
+/// Look up a bird's scientific + common name.
+async fn bird_names(db: &Db, bird_id: i64) -> Result<(String, String)> {
+    sqlx::query_as::<_, (String, String)>(
+        "SELECT scientific_name, common_name FROM birds WHERE id = ?1",
+    )
+    .bind(bird_id)
+    .fetch_optional(&db.0)
+    .await?
+    .ok_or_else(|| anyhow!("Bird {} not found.", bird_id))
+}
+
+/// Candidate recordings for the per-bird browser, plus the scientific name that
+/// was actually queried on XC. `name_fallback` is set when the results came from
+/// the English-name fallback rather than the eBird scientific name — a signal to
+/// warn that the recordings may be filed under a different species name.
+#[derive(Serialize, Clone)]
+pub struct RecordingSearch {
+    pub candidates: Vec<RecordingCandidate>,
+    pub name_fallback: bool,
+    pub scientific_name: String,
 }
 
 /// Search Xeno-Canto for more recordings of a bird already in the library,
@@ -693,12 +776,12 @@ pub async fn search_recordings(
     bird_id: i64,
     quality: Option<String>,
     rec_type: Option<String>,
-) -> Result<Vec<RecordingCandidate>> {
+) -> Result<RecordingSearch> {
     let xc_key = settings::get_setting(db, "xc_api_key")
         .await?
         .filter(|k| !k.trim().is_empty())
         .ok_or_else(|| anyhow!("Missing Xeno-Canto API key — add it in Settings."))?;
-    let sci = bird_sci_name(db, bird_id).await?;
+    let (sci, com) = bird_names(db, bird_id).await?;
     let client = regions::build_client()?;
 
     let have: Vec<String> =
@@ -708,8 +791,9 @@ pub async fn search_recordings(
             .await?;
     let have: std::collections::HashSet<String> = have.into_iter().collect();
 
-    let recs = xc_recordings_for(&client, &xc_key, &sci, quality.as_deref(), rec_type.as_deref()).await;
-    Ok(recs
+    let (recs, name_fallback) =
+        xc_recordings_for(&client, &xc_key, &sci, Some(&com), quality.as_deref(), rec_type.as_deref()).await;
+    let candidates = recs
         .into_iter()
         .filter(|r| !r.file.is_empty() && !have.contains(&r.id))
         .map(|r| RecordingCandidate {
@@ -721,7 +805,8 @@ pub async fn search_recordings(
             location: r.loc,
             license_url: r.lic,
         })
-        .collect())
+        .collect();
+    Ok(RecordingSearch { candidates, name_fallback, scientific_name: sci })
 }
 
 /// Download and insert specific Xeno-Canto recordings (by xc_id) for a bird
@@ -739,7 +824,7 @@ pub async fn add_recordings(
         .await?
         .filter(|k| !k.trim().is_empty())
         .ok_or_else(|| anyhow!("Missing Xeno-Canto API key — add it in Settings."))?;
-    let sci = bird_sci_name(db, bird_id).await?;
+    let (sci, com) = bird_names(db, bird_id).await?;
     let client = regions::build_client()?;
 
     let rec_dir = app
@@ -750,7 +835,7 @@ pub async fn add_recordings(
     std::fs::create_dir_all(&rec_dir)?;
 
     let wanted: std::collections::HashSet<String> = xc_ids.into_iter().collect();
-    let recs = xc_recordings_for(&client, &xc_key, &sci, None, None).await;
+    let (recs, _) = xc_recordings_for(&client, &xc_key, &sci, Some(&com), None, None).await;
     let mut added = 0i64;
     for r in recs.iter().filter(|r| wanted.contains(&r.id) && !r.file.is_empty()) {
         let file_url = if r.file.starts_with("//") {
@@ -788,11 +873,11 @@ pub async fn backfill_recording_meta(db: &Db) -> Result<i64> {
 
     let mut updated = 0i64;
     for bird_id in bird_ids {
-        let sci = match bird_sci_name(db, bird_id).await {
+        let (sci, com) = match bird_names(db, bird_id).await {
             Ok(s) => s,
             Err(_) => continue,
         };
-        let recs = xc_recordings_for(&client, &xc_key, &sci, None, None).await;
+        let (recs, _) = xc_recordings_for(&client, &xc_key, &sci, Some(&com), None, None).await;
         let meta: std::collections::HashMap<String, (String, String)> = recs
             .into_iter()
             .map(|r| (r.id, (r.q, r.rec_type)))
@@ -1154,13 +1239,14 @@ async fn import_taxa(
     quality: Option<&str>,
     rec_type: Option<&str>,
     max_per_species: i64,
-) -> Result<(Vec<i64>, i64, i64, i64)> {
+) -> Result<(Vec<i64>, i64, i64, i64, Vec<String>)> {
     let throttle = Throttle::new();
     let total = taxa.len() as i64;
 
     // Launch one species task. Clones everything it needs so the future is
-    // 'static (spawnable); returns its input index so results stay ordered.
-    let launch = |set: &mut JoinSet<Result<(usize, Option<i64>, i64)>>, i: usize, taxon: Taxon| {
+    // 'static (spawnable); returns its input index so results stay ordered, plus
+    // whether the English-name fallback was used (a possible name mismatch).
+    let launch = |set: &mut JoinSet<Result<(usize, Option<i64>, i64, bool)>>, i: usize, taxon: Taxon| {
         let (app, db, client) = (app.clone(), db.clone(), client.clone());
         let xc_key = xc_key.to_string();
         let rec_dir = rec_dir.to_path_buf();
@@ -1169,22 +1255,23 @@ async fn import_taxa(
         let rec_type = rec_type.map(str::to_string);
         let throttle = throttle.clone();
         set.spawn(async move {
-            let (bird_id, recs) = fetch_species(
+            let (bird_id, recs, used_english) = fetch_species(
                 &app, &db, &client, &xc_key, &rec_dir, &taxon, &region,
                 quality.as_deref(), rec_type.as_deref(), max_per_species, i as i64, total, &throttle,
             )
             .await?;
-            Ok((i, bird_id, recs))
+            Ok((i, bird_id, recs, used_english))
         });
     };
 
-    let mut set: JoinSet<Result<(usize, Option<i64>, i64)>> = JoinSet::new();
+    let mut set: JoinSet<Result<(usize, Option<i64>, i64, bool)>> = JoinSet::new();
     let mut pending = taxa.iter().cloned().enumerate();
     for (i, taxon) in pending.by_ref().take(SPECIES_CONCURRENCY) {
         launch(&mut set, i, taxon);
     }
 
     let mut slots: Vec<Option<i64>> = vec![None; taxa.len()];
+    let mut mismatches: Vec<String> = Vec::new();
     let mut skipped = 0i64;
     let mut recordings_added = 0i64;
     let mut done = 0i64;
@@ -1192,10 +1279,15 @@ async fn import_taxa(
         // A task's own Result: propagate a hard error (DB failure etc.) rather
         // than silently dropping species; a join panic counts as a skip.
         match res {
-            Ok(Ok((i, bird_id, recs))) => {
+            Ok(Ok((i, bird_id, recs, used_english))) => {
                 recordings_added += recs;
                 match bird_id {
-                    Some(id) => slots[i] = Some(id),
+                    Some(id) => {
+                        slots[i] = Some(id);
+                        if used_english {
+                            mismatches.push(taxa[i].com_name.clone());
+                        }
+                    }
                     None => skipped += 1,
                 }
             }
@@ -1211,7 +1303,7 @@ async fn import_taxa(
 
     let bird_ids: Vec<i64> = slots.into_iter().flatten().collect();
     let imported = bird_ids.len() as i64;
-    Ok((bird_ids, imported, skipped, recordings_added))
+    Ok((bird_ids, imported, skipped, recordings_added, mismatches))
 }
 
 /// Fetch one species' Xeno-Canto audio, download up to `max_per_species` clips,
@@ -1234,57 +1326,38 @@ async fn fetch_species(
     idx: i64,
     total: i64,
     throttle: &Throttle,
-) -> Result<(Option<i64>, i64)> {
-    // XC v3 query. v3 requires tagged terms — a bare "Genus species" errors;
-    // the species is given via the sp: tag with the full binomial quoted.
-    let mut query = format!("sp:\"{}\"", taxon.sci_name);
-    if let Some(q) = quality.filter(|s| !s.is_empty()) {
-        query.push_str(&format!(" q:{}", q));
-    }
-    if let Some(t) = rec_type.filter(|s| !s.is_empty()) {
-        query.push_str(&format!(" type:{}", t));
-    }
-
+) -> Result<(Option<i64>, i64, bool)> {
     // Pace the rate-limited API query (shared across concurrent species tasks).
     throttle.api_slot().await;
 
-    // Fetch as text first so we can surface exactly what XC returned when
-    // parsing or the query is off (v3 shape/syntax diagnostics).
-    let xc: XcResponse = match client
-        .get(format!("{}?query={}&key={}", XC_BASE, enc(&query), enc(xc_key)))
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            match serde_json::from_str::<XcResponse>(&body) {
-                Ok(x) => {
-                    emit(app, "downloading", format!("XC {} → {} recs [{}]", status.as_u16(), x.recordings.len(), query), idx, total);
-                    x
-                }
-                Err(e) => {
-                    let snippet: String = body.chars().take(400).collect();
-                    emit(app, "downloading", format!("XC {} parse-fail: {} | {}", status.as_u16(), e, snippet), idx, total);
-                    XcResponse { recordings: vec![] }
-                }
-            }
-        }
-        Err(e) => {
-            emit(app, "downloading", format!("XC request error: {}", e), idx, total);
-            XcResponse { recordings: vec![] }
-        }
-    };
+    // Primary query: eBird scientific name via the sp: tag.
+    let sci_query = xc_query(&format!("sp:\"{}\"", taxon.sci_name), quality, rec_type);
+    let mut recordings = xc_fetch_diag(app, client, xc_key, &sci_query, idx, total).await;
 
-    let picks: Vec<XcRecording> = xc
-        .recordings
+    // Fallback: if the sci-name query found nothing usable, retry by English
+    // name. eBird (Clements) and XC diverge on some binomials after genus
+    // splits/merges, so the sci-name query misses a species XC has under a
+    // different name. Flag it so the user can verify the match.
+    let mut used_english = false;
+    if !recordings.iter().any(|r| !r.file.is_empty()) && !taxon.com_name.trim().is_empty() {
+        throttle.api_slot().await;
+        let en_query = xc_query(&format!("en:\"{}\"", taxon.com_name), quality, rec_type);
+        let en_recs = xc_fetch_diag(app, client, xc_key, &en_query, idx, total).await;
+        if en_recs.iter().any(|r| !r.file.is_empty()) {
+            emit(app, "downloading", format!("⚠ no XC match for '{}' — used English name '{}'; verify species", taxon.sci_name, taxon.com_name), idx, total);
+            recordings = en_recs;
+            used_english = true;
+        }
+    }
+
+    let picks: Vec<XcRecording> = recordings
         .into_iter()
         .filter(|r| !r.file.is_empty())
         .take(max_per_species.max(1) as usize)
         .collect();
 
     if picks.is_empty() {
-        return Ok((None, 0));
+        return Ok((None, 0, false));
     }
 
     let bird_id = upsert_bird(db, taxon, region).await?;
@@ -1322,7 +1395,7 @@ async fn fetch_species(
         }
     }
 
-    Ok((Some(bird_id), recs))
+    Ok((Some(bird_id), recs, used_english))
 }
 
 /// Is this status worth retrying? XC's download host answers 503/502/504 under
