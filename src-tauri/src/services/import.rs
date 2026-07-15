@@ -1102,6 +1102,56 @@ pub async fn backfill_recording_meta(app: &AppHandle, db: &Db) -> Result<i64> {
             }
         }
     }
+
+    // Resolve background species names that diverge from eBird taxonomy (XC uses
+    // IOC) by asking Xeno-Canto for each one's English name, and cache it — so
+    // they display, and are excluded from options, by common name.
+    let bg_json: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT background_json FROM recordings WHERE background_json IS NOT NULL")
+            .fetch_all(&db.0)
+            .await?;
+    let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for j in bg_json {
+        for n in parse_background(j) {
+            names.insert(n);
+        }
+    }
+    let mut unknown: Vec<String> = Vec::new();
+    for n in names {
+        if common_for_sci(db, &n).await.is_none() {
+            unknown.push(n);
+        }
+    }
+    let bg_total = unknown.len() as i64;
+    for (i, sci) in unknown.into_iter().enumerate() {
+        emit(app, "backfill", format!("Naming background species ({}/{})", i as i64 + 1, bg_total), i as i64 + 1, bg_total);
+        throttle.api_slot().await;
+        let recs = xc_fetch(&client, &xc_key, &format!("sp:\"{}\"", sci)).await;
+        if let Some(en) = recs.into_iter().find_map(|r| {
+            let e = r.en.trim().to_string();
+            (!e.is_empty()).then_some(e)
+        }) {
+            // Prefer the eBird taxonomy's canonical spelling (matched on a
+            // normalized form) so the cached name lines up exactly with library
+            // birds; otherwise keep XC's name (e.g. a species eBird lumps away).
+            let canonical: Option<String> = sqlx::query_scalar(
+                "SELECT common_name FROM taxonomy
+                 WHERE replace(replace(lower(common_name), '-', ' '), 'grey', 'gray') = ?1
+                 LIMIT 1",
+            )
+            .bind(normalize_common(&en))
+            .fetch_optional(&db.0)
+            .await?;
+            let name = canonical.unwrap_or(en);
+            sqlx::query(
+                "INSERT OR REPLACE INTO species_names (scientific_name, common_name) VALUES (?1, ?2)",
+            )
+            .bind(&sci)
+            .bind(&name)
+            .execute(&db.0)
+            .await?;
+        }
+    }
     Ok(updated)
 }
 
@@ -1293,6 +1343,30 @@ fn parse_background(json: Option<String>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Normalize a common name for cross-taxonomy comparison: lowercase, hyphens to
+/// spaces, and British→American "grey/gray". Bridges the small spelling
+/// differences between XC (IOC) and eBird (Clements) common names.
+fn normalize_common(s: &str) -> String {
+    s.to_lowercase().replace('-', " ").replace("grey", "gray")
+}
+
+/// Resolve a scientific name to a common name — via the library first, then the
+/// cached eBird taxonomy. `None` if neither knows the species (caller falls back
+/// to showing the scientific name).
+pub(crate) async fn common_for_sci(db: &Db, sci: &str) -> Option<String> {
+    sqlx::query_scalar::<_, Option<String>>(
+        r#"SELECT COALESCE(
+             (SELECT common_name FROM birds         WHERE scientific_name = ?1),
+             (SELECT common_name FROM taxonomy      WHERE scientific_name = ?1),
+             (SELECT common_name FROM species_names WHERE scientific_name = ?1))"#,
+    )
+    .bind(sci)
+    .fetch_one(&db.0)
+    .await
+    .ok()
+    .flatten()
+}
+
 /// All recordings stored for a bird.
 pub async fn get_bird_recordings(db: &Db, bird_id: i64) -> Result<Vec<RecordingInfo>> {
     let rows = sqlx::query(
@@ -1305,7 +1379,7 @@ pub async fn get_bird_recordings(db: &Db, bird_id: i64) -> Result<Vec<RecordingI
     .fetch_all(&db.0)
     .await?;
     use sqlx::Row;
-    Ok(rows
+    let mut out: Vec<RecordingInfo> = rows
         .into_iter()
         .map(|row| RecordingInfo {
             id: row.get("id"),
@@ -1319,7 +1393,18 @@ pub async fn get_bird_recordings(db: &Db, bird_id: i64) -> Result<Vec<RecordingI
             rec_type: row.get("rec_type"),
             background: parse_background(row.get("background_json")),
         })
-        .collect())
+        .collect();
+
+    // Show background species by common name (falling back to the scientific
+    // name only when neither the library nor the taxonomy cache knows it).
+    for rec in &mut out {
+        let mut display = Vec::with_capacity(rec.background.len());
+        for sci in &rec.background {
+            display.push(common_for_sci(db, sci).await.unwrap_or_else(|| sci.clone()));
+        }
+        rec.background = display;
+    }
+    Ok(out)
 }
 
 /// Delete a recording: its DB row, pack links, history refs, and — if the audio
@@ -1781,6 +1866,13 @@ mod tests {
         assert_eq!(extract_xc_number("nr=555").as_deref(), Some("555"));
         assert_eq!(extract_xc_number("Mallard"), None);
         assert_eq!(extract_xc_number(""), None);
+    }
+
+    #[test]
+    fn normalize_common_bridges_spelling() {
+        assert_eq!(normalize_common("Grey-headed Gull"), normalize_common("Gray-headed Gull"));
+        assert_eq!(normalize_common("Southern Masked-Weaver"), "southern masked weaver");
+        assert_eq!(normalize_common("Rufous-naped Lark"), "rufous naped lark");
     }
 
     #[test]
