@@ -271,7 +271,18 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
     // lazily in ranked order, one 100-code chunk at a time, stopping as soon as
     // the cap is filled — so a small `max_species` on a big region only costs a
     // chunk or two of taxonomy calls instead of resolving the whole region.
-    let family_filter = params.family.as_deref().map(str::to_lowercase);
+    // Comma-separated list of family terms; a species passes if it matches ANY
+    // of them (substring, case-insensitive). Empty terms are dropped.
+    let family_filters: Vec<String> = params
+        .family
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .map(|t| t.trim().to_lowercase())
+                .filter(|t| !t.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
     let cap = params.max_species.max(1) as usize;
     // Species already in the library, so the cap fills with new birds (and we
     // don't re-query/re-download ones the user already has). Skipped unless the
@@ -310,11 +321,11 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
                 continue; // already in the library — don't spend the cap on it
             }
             let Some(t) = taxa_by_code.get(code) else { continue }; // no name
-            if let Some(fam) = &family_filter {
-                let matches = t
-                    .family_com_name
+            if !family_filters.is_empty() {
+                let fam_lc = t.family_com_name.as_ref().map(|f| f.to_lowercase());
+                let matches = fam_lc
                     .as_ref()
-                    .map(|f| f.to_lowercase().contains(fam))
+                    .map(|f| family_filters.iter().any(|term| f.contains(term)))
                     .unwrap_or(false);
                 if !matches {
                     continue;

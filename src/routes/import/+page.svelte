@@ -334,6 +334,7 @@
 				<span class="mb-1.5 block text-sm font-medium">Family filter <span class="text-be-muted-fg">(optional)</span></span>
 				<input bind:value={family} placeholder="e.g. Thrushes, Owls" disabled={running}
 					class="w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40" />
+				<span class="mt-1 block text-xs text-be-muted-fg">Comma-separate to match several families (any of them).</span>
 			</label>
 
 			<label class="mt-4 flex items-center gap-2.5">
