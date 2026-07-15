@@ -429,10 +429,17 @@ pub async fn create_pack(
     state: State<'_, AppState>,
     name: String,
     bird_ids: Vec<i64>,
+    icon: Option<String>,
 ) -> Result<String, String> {
-    crate::services::packs::create_pack_from_birds(&state.db, &name, &bird_ids)
+    let id = crate::services::packs::create_pack_from_birds(&state.db, &name, &bird_ids)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if icon.is_some() {
+        crate::services::packs::set_pack_icon(&state.db, &id, icon.as_deref())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(id)
 }
 
 /// Birds contained in a pack (for the pack editor).
@@ -453,6 +460,18 @@ pub async fn rename_pack(
     name: String,
 ) -> Result<(), String> {
     crate::services::packs::rename_pack(&state.db, &pack_id, &name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Set (or clear) a pack's icon emoji.
+#[tauri::command]
+pub async fn set_pack_icon(
+    state: State<'_, AppState>,
+    pack_id: String,
+    icon: Option<String>,
+) -> Result<(), String> {
+    crate::services::packs::set_pack_icon(&state.db, &pack_id, icon.as_deref())
         .await
         .map_err(|e| e.to_string())
 }
@@ -512,6 +531,7 @@ pub async fn create_pack_from_filter(
     name: Option<String>,
     region: Option<String>,
     family: Option<String>,
+    icon: Option<String>,
 ) -> Result<String, String> {
     let region = region.filter(|r| !r.trim().is_empty());
     let family = family.filter(|f| !f.trim().is_empty());
@@ -522,7 +542,13 @@ pub async fn create_pack_from_filter(
         (None, Some(f)) => crate::services::packs::create_pack_from_family(&state.db, name, &f).await,
         (None, None) => Err(anyhow::anyhow!("Set a region or family to filter by.")),
     };
-    result.map_err(|e| e.to_string())
+    let id = result.map_err(|e| e.to_string())?;
+    if icon.is_some() {
+        crate::services::packs::set_pack_icon(&state.db, &id, icon.as_deref())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(id)
 }
 
 /// Import birds from eBird + Xeno-Canto. Emits `import://progress` events and

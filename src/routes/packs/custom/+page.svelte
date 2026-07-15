@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import RegionPicker from '$lib/components/RegionPicker.svelte';
+	import IconPicker from '$lib/components/IconPicker.svelte';
 	import {
 		getBirds,
 		createPack,
@@ -21,11 +22,13 @@
 	let name = $state('');
 	let query = $state('');
 	let selected = $state<Set<number>>(new Set());
+	let icon = $state<string | null>(null);
 
 	// Filter
 	let filterName = $state('');
 	let filterRegion = $state('');
 	let filterFamily = $state('');
+	let filterIcon = $state<string | null>(null);
 
 	onMount(async () => {
 		try {
@@ -60,7 +63,7 @@
 		creating = true;
 		error = null;
 		try {
-			await createPack(name.trim(), [...selected]);
+			await createPack(name.trim(), [...selected], icon);
 			goto('/library');
 		} catch (e) {
 			error = (e as string) ?? 'Failed to create pack.';
@@ -80,7 +83,8 @@
 			await createPackFromFilter(
 				filterName.trim() || null,
 				filterRegion.trim() || null,
-				filterFamily.trim() || null
+				filterFamily.trim() || null,
+				filterIcon
 			);
 			goto('/library');
 		} catch (e) {
@@ -125,6 +129,11 @@
 				<input bind:value={name} placeholder="Garden regulars"
 					class="w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40" />
 			</label>
+
+			<div class="mt-4">
+				<span class="mb-1.5 block text-sm font-medium">Icon <span class="text-be-muted-fg">(optional)</span></span>
+				<IconPicker bind:value={icon} disabled={creating} />
+			</div>
 
 			<div class="mt-4 flex items-center justify-between">
 				<span class="text-sm font-medium">Birds <span class="text-be-muted-fg">({selected.size} selected)</span></span>
@@ -173,6 +182,10 @@
 				<input bind:value={filterName} placeholder="auto-named from the filter"
 					class="w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40" />
 			</label>
+			<div class="mt-4">
+				<span class="mb-1.5 block text-sm font-medium">Icon <span class="text-be-muted-fg">(optional)</span></span>
+				<IconPicker bind:value={filterIcon} disabled={creating} />
+			</div>
 			<div class="mt-4 block">
 				<span class="mb-1.5 block text-sm font-medium">Region</span>
 				<RegionPicker bind:value={filterRegion} />

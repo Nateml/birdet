@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import type { UnlistenFn } from '@tauri-apps/api/event';
 	import RegionPicker from '$lib/components/RegionPicker.svelte';
+	import IconPicker from '$lib/components/IconPicker.svelte';
 	import {
 		importBirds,
 		importSpecies,
@@ -26,6 +27,7 @@
 	let createPack = $state(true);
 	let skipExisting = $state(true);
 	let packIncludeSkipped = $state(false);
+	let packIcon = $state<string | null>(null);
 
 	// Shared XC filters (both modes)
 	let maxPerSpecies = $state(1);
@@ -150,7 +152,8 @@
 					family: family.trim() || null,
 					create_pack: createPack,
 					skip_existing: skipExisting,
-					pack_include_skipped: skipExisting && packIncludeSkipped
+					pack_include_skipped: skipExisting && packIncludeSkipped,
+					pack_icon: createPack ? packIcon : null
 				})
 			);
 		} catch (e) {
@@ -368,6 +371,13 @@
 				<input type="checkbox" bind:checked={createPack} disabled={running} class="accent-be-primary" />
 				<span class="text-sm">Create a pack from this import</span>
 			</label>
+
+			{#if createPack}
+				<div class="mt-3 ml-6">
+					<span class="mb-1.5 block text-sm font-medium">Pack icon <span class="text-be-muted-fg">(optional)</span></span>
+					<IconPicker bind:value={packIcon} disabled={running} />
+				</div>
+			{/if}
 
 			<button
 				onclick={runRegion}

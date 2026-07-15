@@ -177,6 +177,20 @@ pub async fn rename_pack(db: &Db, pack_id: &str, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Set (or clear, with `None`) a pack's icon. An icon is a short emoji string.
+pub async fn set_pack_icon(db: &Db, pack_id: &str, icon: Option<&str>) -> Result<()> {
+    let icon = icon.map(str::trim).filter(|s| !s.is_empty());
+    let res = sqlx::query("UPDATE packs SET icon = ?2 WHERE id = ?1")
+        .bind(pack_id)
+        .bind(icon)
+        .execute(&db.0)
+        .await?;
+    if res.rows_affected() == 0 {
+        return Err(anyhow!("Pack {} not found.", pack_id));
+    }
+    Ok(())
+}
+
 /// Delete a pack and its recording links. Birds/recordings are untouched.
 pub async fn delete_pack(db: &Db, pack_id: &str) -> Result<()> {
     sqlx::query("DELETE FROM pack_recordings WHERE pack_id = ?1")
@@ -272,16 +286,17 @@ pub async fn get_packs(db: &Db) -> Result<Vec<Pack>> {
     // Query all packs and count associated birds
     let rows = sqlx::query!(
         r#"
-        SELECT 
-            p.id AS id, 
-            p.name AS name, 
-            p.description AS description, 
+        SELECT
+            p.id AS id,
+            p.name AS name,
+            p.description AS description,
+            p.icon AS icon,
             COALESCE(COUNT(DISTINCT b.id), 0) AS bird_count
-        FROM packs AS p 
+        FROM packs AS p
         LEFT JOIN pack_recordings AS pr ON p.id = pr.pack_id
         LEFT JOIN recordings AS r on pr.recording_id = r.id
-        LEFT JOIN birds AS b on r.bird_id = b.id 
-        GROUP BY p.id, p.name, p.description 
+        LEFT JOIN birds AS b on r.bird_id = b.id
+        GROUP BY p.id, p.name, p.description, p.icon
         ORDER BY p.name;
         "#
     )
@@ -294,6 +309,7 @@ pub async fn get_packs(db: &Db) -> Result<Vec<Pack>> {
             id: row.id,
             name: row.name,
             description: row.description,
+            icon: row.icon,
             bird_count: row.bird_count,
         }
     }).collect::<Vec<_>>();

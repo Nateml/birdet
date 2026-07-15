@@ -76,6 +76,7 @@ fn main() -> anyhow::Result<()> {
             commands::resolve_ebird_list,
             commands::get_pack_birds,
             commands::rename_pack,
+            commands::set_pack_icon,
             commands::delete_pack,
             commands::add_birds_to_pack,
             commands::remove_bird_from_pack,

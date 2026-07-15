@@ -4,6 +4,7 @@ export type PackDto = {
     id: string;
     name: string;
     description: string | null;
+    icon: string | null;
     bird_count: number;
 }
 
@@ -36,16 +37,21 @@ export async function getBirdPacks(): Promise<BirdPackTag[]> {
     return await invoke<BirdPackTag[]>('get_bird_packs');
 }
 
-export async function createPack(name: string, birdIds: number[]): Promise<string> {
-    return await invoke<string>('create_pack', { name, birdIds });
+export async function createPack(
+    name: string,
+    birdIds: number[],
+    icon: string | null = null
+): Promise<string> {
+    return await invoke<string>('create_pack', { name, birdIds, icon });
 }
 
 export async function createPackFromFilter(
     name: string | null,
     region: string | null,
-    family: string | null
+    family: string | null,
+    icon: string | null = null
 ): Promise<string> {
-    return await invoke<string>('create_pack_from_filter', { name, region, family });
+    return await invoke<string>('create_pack_from_filter', { name, region, family, icon });
 }
 
 export async function getPackBirds(packId: string): Promise<BirdListItem[]> {
@@ -54,6 +60,10 @@ export async function getPackBirds(packId: string): Promise<BirdListItem[]> {
 
 export async function renamePack(packId: string, name: string): Promise<void> {
     await invoke('rename_pack', { packId, name });
+}
+
+export async function setPackIcon(packId: string, icon: string | null): Promise<void> {
+    await invoke('set_pack_icon', { packId, icon });
 }
 
 export async function deletePack(packId: string): Promise<void> {
