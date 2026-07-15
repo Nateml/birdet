@@ -345,12 +345,12 @@
 			</label>
 
 			<label
-				class="mt-3 ml-6 flex items-center gap-2.5 {!skipExisting ? 'opacity-50' : ''}"
+				class="mt-3 ml-6 flex items-center gap-2.5 {!skipExisting || !createPack ? 'opacity-50' : ''}"
 			>
 				<input
 					type="checkbox"
 					bind:checked={packIncludeSkipped}
-					disabled={running || !skipExisting}
+					disabled={running || !skipExisting || !createPack}
 					class="accent-be-primary"
 				/>
 				<span class="text-sm">Still add skipped birds to the pack <span class="text-be-muted-fg">(include ones you already have)</span></span>
