@@ -1558,8 +1558,7 @@ pub async fn delete_bird(app: &AppHandle, db: &Db, bird_id: i64) -> Result<()> {
 /// Import a ranked list of taxa concurrently: up to `SPECIES_CONCURRENCY`
 /// species in flight at once, each fetching + downloading its recordings while
 /// the shared `Throttle` keeps XC API queries paced. Returns
-/// `(bird_ids_in_input_order, imported, skipped, recordings_added, in_library, added_to_pack,
-/// mismatches)`.
+/// `(bird_ids_in_input_order, imported, skipped, recordings_added, mismatches)`.
 #[allow(clippy::too_many_arguments)]
 async fn import_taxa(
     app: &AppHandle,
