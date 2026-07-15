@@ -26,6 +26,7 @@ export type ImportSummary = {
     species_skipped: number;
     recordings_added: number;
     pack_id: string | null;
+    added_to_pack: number;
     // Common names whose recordings came from the English-name fallback
     // (eBird↔Xeno-Canto scientific-name mismatch) — worth a sanity-check.
     name_mismatches: string[];

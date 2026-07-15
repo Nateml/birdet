@@ -123,6 +123,7 @@ pub struct ImportSummary {
     pub species_skipped: i64,
     pub recordings_added: i64,
     pub pack_id: Option<String>,
+    pub added_to_pack: i64,
     /// Common names of species whose recordings came from the English-name
     /// fallback (eBird↔XC scientific-name mismatch) — worth a user sanity-check.
     #[serde(default)]
@@ -367,7 +368,7 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
     std::fs::create_dir_all(&rec_dir)?;
 
     let taxa: Vec<Taxon> = targets.iter().map(|c| taxa_by_code[c].clone()).collect();
-    let (imported_bird_ids, species_imported, species_skipped, recordings_added, name_mismatches) =
+    let (imported_bird_ids, species_imported, mut species_skipped, recordings_added, name_mismatches) =
         import_taxa(
             app, db, &client, &xc_key, &rec_dir, &taxa, &params.region,
             params.quality.as_deref(), params.rec_type.as_deref(), params.max_per_species,
@@ -378,6 +379,7 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
     // Combine freshly-imported birds with any skipped (already-owned) ones the
     // user asked to fold in, so the pack covers the whole region/family.
     let mut pack_bird_ids = imported_bird_ids.clone();
+    let mut added_to_pack = 0;
     if params.pack_include_skipped {
         for code in &skipped_codes {
             if let Some(id) = sqlx::query_scalar::<_, i64>("SELECT id FROM birds WHERE ebird_code = ?1")
@@ -386,9 +388,11 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
                 .await?
             {
                 pack_bird_ids.push(id);
+                added_to_pack += 1;
             }
         }
     }
+    species_skipped += skipped_codes.len() as i64; // skipped because already in library
 
     let pack_id = if params.create_pack && !pack_bird_ids.is_empty() {
         let name = format!(
@@ -401,7 +405,7 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
         None
     };
 
-    let summary = ImportSummary { species_imported, species_skipped, recordings_added, pack_id, name_mismatches };
+    let summary = ImportSummary { species_imported, species_skipped, recordings_added, pack_id, added_to_pack, name_mismatches };
     emit(
         app,
         "done",
@@ -451,6 +455,7 @@ pub async fn import_species(
         .await?;
 
     // Attach imported birds to the chosen packs.
+    let mut added_to_pack = 0;
     let mut pack_id = None;
     if !imported_bird_ids.is_empty() {
         for pid in &pack_ids {
@@ -461,6 +466,7 @@ pub async fn import_species(
                 crate::services::packs::create_pack_from_birds(db, &name, &imported_bird_ids).await?,
             );
         }
+        added_to_pack = pack_ids.len() as i64;
     }
 
     emit(
@@ -470,7 +476,7 @@ pub async fn import_species(
         total,
         total,
     );
-    Ok(ImportSummary { species_imported, species_skipped, recordings_added, pack_id, name_mismatches })
+    Ok(ImportSummary { species_imported, species_skipped, recordings_added, pack_id, added_to_pack, name_mismatches })
 }
 
 /// Import a pack from an exported `birdet-pack` JSON file. Birds already in the
@@ -1552,7 +1558,8 @@ pub async fn delete_bird(app: &AppHandle, db: &Db, bird_id: i64) -> Result<()> {
 /// Import a ranked list of taxa concurrently: up to `SPECIES_CONCURRENCY`
 /// species in flight at once, each fetching + downloading its recordings while
 /// the shared `Throttle` keeps XC API queries paced. Returns
-/// `(bird_ids_in_input_order, imported, skipped, recordings_added)`.
+/// `(bird_ids_in_input_order, imported, skipped, recordings_added, in_library, added_to_pack,
+/// mismatches)`.
 #[allow(clippy::too_many_arguments)]
 async fn import_taxa(
     app: &AppHandle,
