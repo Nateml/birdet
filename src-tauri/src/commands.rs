@@ -268,8 +268,11 @@ pub async fn search_bird_recordings(
 
 /// Back-fill quality + type on older recordings. Returns the count updated.
 #[tauri::command]
-pub async fn backfill_recording_meta(state: State<'_, AppState>) -> Result<i64, String> {
-    crate::services::import::backfill_recording_meta(&state.db)
+pub async fn backfill_recording_meta(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<i64, String> {
+    crate::services::import::backfill_recording_meta(&app, &state.db)
         .await
         .map_err(|e| e.to_string())
 }

@@ -14,7 +14,7 @@ export type ImportParams = {
 };
 
 export type ImportProgress = {
-    stage: 'fetching' | 'species' | 'downloading' | 'done' | 'error';
+    stage: 'fetching' | 'species' | 'downloading' | 'backfill' | 'done' | 'error';
     message: string;
     current: number;
     total: number;

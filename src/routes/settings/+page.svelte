@@ -10,6 +10,7 @@
 		DEFAULT_MAX_RECORDING_SECONDS
 	} from '$lib/api/settings';
 	import { backfillRecordingMeta, repairRecordings } from '$lib/api/recordings';
+	import { onImportProgress } from '$lib/api/import';
 	import { updateState, checkForUpdate, installUpdate } from '$lib/stores/updater';
 	import logo from '$lib/assets/logo.svg';
 
@@ -67,17 +68,27 @@
 	// Back-fill quality/type on recordings imported before those fields existed.
 	let backfilling = $state(false);
 	let backfillMsg = $state<string | null>(null);
+	let backfillProgress = $state<{ current: number; total: number; message: string } | null>(null);
 	async function runBackfill() {
 		if (backfilling) return;
 		backfilling = true;
 		backfillMsg = null;
+		backfillProgress = null;
+		// Listen for per-species progress the backend emits during the backfill.
+		const unlisten = await onImportProgress((p) => {
+			if (p.stage === 'backfill') {
+				backfillProgress = { current: p.current, total: p.total, message: p.message };
+			}
+		});
 		try {
 			const n = await backfillRecordingMeta();
 			backfillMsg = n > 0 ? `Updated ${n} recording${n > 1 ? 's' : ''}.` : 'All recordings already up to date.';
 		} catch (e) {
 			backfillMsg = (e as string) ?? 'Backfill failed.';
 		} finally {
+			unlisten();
 			backfilling = false;
+			backfillProgress = null;
 		}
 	}
 
@@ -324,7 +335,21 @@
 						{backfilling ? 'Fetching…' : 'Back-fill'}
 					</button>
 				</div>
-				{#if backfillMsg}
+				{#if backfilling && backfillProgress}
+					{@const p = backfillProgress}
+					<div class="mt-1">
+						<div class="mb-1 flex justify-between font-be-mono text-[11px] text-be-muted-fg">
+							<span class="truncate">{p.message}</span>
+							{#if p.total > 0}<span class="shrink-0 tabular-nums">{p.current}/{p.total}</span>{/if}
+						</div>
+						<div class="h-1.5 w-full overflow-hidden rounded-full bg-be-muted">
+							<div
+								class="h-full rounded-full bg-be-primary transition-all duration-300"
+								style="width: {p.total > 0 ? (p.current / p.total) * 100 : 0}%"
+							></div>
+						</div>
+					</div>
+				{:else if backfillMsg}
 					<p class="text-xs text-be-muted-fg">{backfillMsg}</p>
 				{/if}
 			</div>
