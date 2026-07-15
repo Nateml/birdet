@@ -3,11 +3,13 @@
 	import { get } from 'svelte/store';
 	import { startSession } from '$lib/stores/session';
 	import { setup } from '$lib/stores/setup';
+	import IconPicker from '$lib/components/IconPicker.svelte';
 	import {
 		getPacks,
 		getPackBirds,
 		getBirds,
 		renamePack,
+		setPackIcon,
 		deletePack,
 		addBirdsToPack,
 		removeBirdFromPack,
@@ -36,6 +38,7 @@
 
 	let name = $state('');
 	let originalName = $state('');
+	let icon = $state<string | null>(null);
 	let packBirds = $state<BirdListItem[]>([]);
 	let allBirds = $state<BirdListItem[]>([]);
 	let loading = $state(true);
@@ -72,6 +75,7 @@
 			if (!pack) throw new Error('Pack not found.');
 			name = pack.name;
 			originalName = pack.name;
+			icon = pack.icon;
 			packBirds = pb;
 			allBirds = all;
 		} catch (e) {
@@ -105,6 +109,23 @@
 		} catch (e) {
 			error = (e as string) ?? 'Rename failed.';
 			name = originalName;
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function saveIcon(next: string | null) {
+		if (busy || next === icon) return;
+		const prev = icon;
+		icon = next; // optimistic
+		busy = true;
+		error = null;
+		try {
+			await setPackIcon(packId, next);
+			onChanged?.();
+		} catch (e) {
+			error = (e as string) ?? 'Icon update failed.';
+			icon = prev;
 		} finally {
 			busy = false;
 		}
@@ -205,6 +226,10 @@
 				<input bind:value={name} onblur={saveName} disabled={busy}
 					class="font-be-serif w-full rounded-lg border border-transparent bg-transparent text-2xl font-bold leading-tight text-be-fg outline-none hover:border-be-border focus:border-be-primary/40 focus:px-3 focus:py-1" />
 			</label>
+			<div class="mt-4">
+				<span class="mb-1.5 block text-xs font-medium text-be-muted-fg">Icon</span>
+				<IconPicker value={icon} onSelect={saveIcon} disabled={busy} />
+			</div>
 		</div>
 
 		{#if error}

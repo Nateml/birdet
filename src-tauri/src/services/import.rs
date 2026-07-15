@@ -102,6 +102,8 @@ pub struct ImportParams {
     pub skip_existing: bool,        // skip species already in the library (fill the cap with new ones)
     #[serde(default)]
     pub pack_include_skipped: bool, // fold already-owned (skipped) birds into the created pack
+    #[serde(default)]
+    pub pack_icon: Option<String>,  // emoji icon for the created pack
 }
 
 fn default_true() -> bool {
@@ -400,7 +402,11 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
             params.family.clone().unwrap_or_else(|| params.region.clone()),
             pack_bird_ids.len()
         );
-        Some(crate::services::packs::create_pack_from_birds(db, &name, &pack_bird_ids).await?)
+        let id = crate::services::packs::create_pack_from_birds(db, &name, &pack_bird_ids).await?;
+        if params.pack_icon.is_some() {
+            crate::services::packs::set_pack_icon(db, &id, params.pack_icon.as_deref()).await?;
+        }
+        Some(id)
     } else {
         None
     };

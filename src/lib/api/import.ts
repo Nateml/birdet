@@ -12,6 +12,7 @@ export type ImportParams = {
     create_pack: boolean;
     skip_existing: boolean;
     pack_include_skipped: boolean;
+    pack_icon: string | null;
 };
 
 export type ImportProgress = {

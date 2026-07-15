@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT\n            p.id AS id,\n            p.name AS name,\n            p.description AS description,\n            p.icon AS icon,\n            COALESCE(COUNT(DISTINCT b.id), 0) AS bird_count\n        FROM packs AS p\n        LEFT JOIN pack_recordings AS pr ON p.id = pr.pack_id\n        LEFT JOIN recordings AS r on pr.recording_id = r.id\n        LEFT JOIN birds AS b on r.bird_id = b.id\n        GROUP BY p.id, p.name, p.description, p.icon\n        ORDER BY p.name;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "icon",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "bird_count",
+        "ordinal": 4,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "e4dbdf807a085d8ef4e1e0efbfb5fb106a3ab3956273a642e03b7ae6bc419a3b"
+}

@@ -5,6 +5,7 @@ pub struct Pack {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    pub icon: Option<String>,
     pub bird_count: i64,
 }
 
