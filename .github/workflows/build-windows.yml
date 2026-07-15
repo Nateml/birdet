@@ -115,6 +115,10 @@ jobs:
       SQLX_OFFLINE: 'true'
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history + tags so the changelog step can diff against the
+          # previous release tag (same as the Windows job).
+          fetch-depth: 0
 
       - name: Install system dependencies
         run: |
@@ -145,6 +149,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Regenerate the same notes as the Windows job. This job runs last and
+      # merges its platform into latest.json, so it must pass the same
+      # releaseBody — otherwise it rewrites the updater's `notes` to empty.
+      - name: Generate release notes
+        id: notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          prev=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            log=$(git log "$prev..HEAD" --no-merges --pretty="- %s")
+          else
+            log=$(git log --no-merges --pretty="- %s")
+          fi
+          [ -z "$log" ] && log="- Maintenance release."
+          delim="EOF_$(date +%s%N)"
+          {
+            echo "body<<$delim"
+            echo "$log"
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build app + bundles
         uses: tauri-apps/tauri-action@v0
         env:
@@ -163,6 +188,16 @@ jobs:
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: Birdet ${{ github.ref_name }}
           releaseDraft: true
+          # Must match the Windows job's body so the merged latest.json keeps the
+          # changelog the in-app updater displays.
+          releaseBody: |
+            ## What's changed
+
+            ${{ steps.notes.outputs.body }}
+
+            ---
+            The installer is unsigned, so Windows SmartScreen will warn on first
+            run — click **More info → Run anyway**.
 
       - name: Upload Linux artifacts
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
