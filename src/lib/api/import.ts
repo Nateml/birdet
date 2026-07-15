@@ -11,6 +11,7 @@ export type ImportParams = {
     family: string | null;
     create_pack: boolean;
     skip_existing: boolean;
+    pack_include_skipped: boolean;
 };
 
 export type ImportProgress = {
