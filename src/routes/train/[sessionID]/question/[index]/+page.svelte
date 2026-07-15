@@ -699,6 +699,21 @@
 			{/if}
 		</div>
 
+		<!-- Background birds: other species audible in the clip. Opt-in, shown
+		     under the player. Excluded from the answer options either way. -->
+		{#if $setup.showBackground && question.background.length > 0}
+			<div class="mb-7 rounded-lg border border-be-border/60 bg-be-card/40 px-3.5 py-2.5">
+				<p class="font-be-mono text-[11px] uppercase tracking-widest text-be-muted-fg">Background birds in this clip</p>
+				<p class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-sm">
+					{#each question.background as b (b.scientific)}
+						<span class="text-be-muted-fg">
+							{b.common ?? b.scientific}{#if b.common}<span class="text-be-muted-fg/60"> · <em>{b.scientific}</em></span>{/if}
+						</span>
+					{/each}
+				</p>
+			</div>
+		{/if}
+
 		<!-- Choices -->
 		<div class="mb-3 flex items-center justify-between">
 			<p class="font-be-mono text-xs uppercase tracking-widest text-be-muted-fg">Identify the bird</p>

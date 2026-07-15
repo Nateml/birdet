@@ -132,6 +132,29 @@
 			</button>
 		</label>
 
+		<label class="mt-4 flex items-center justify-between gap-4 border-t border-be-border pt-4">
+			<span>
+				<span class="block text-sm font-medium">Show background birds</span>
+				<span class="block text-xs text-be-muted-fg">List other species heard in the clip under the player. They're never offered as wrong options.</span>
+			</span>
+			<button
+				type="button"
+				role="switch"
+				aria-label="Show background birds"
+				aria-checked={$setup.showBackground}
+				onclick={() => setup.update((s) => ({ ...s, showBackground: !s.showBackground }))}
+				class="relative h-6 w-11 shrink-0 rounded-full transition-colors {$setup.showBackground
+					? 'bg-be-primary'
+					: 'bg-be-muted'}"
+			>
+				<span
+					class="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all {$setup.showBackground
+						? 'left-[22px]'
+						: 'left-0.5'}"
+				></span>
+			</button>
+		</label>
+
 		<div class="mt-4 border-t border-be-border pt-4">
 			<span class="mb-2 block text-sm font-medium">Answer mode</span>
 			<div class="grid grid-cols-2 gap-2">

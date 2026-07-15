@@ -6,6 +6,13 @@ use anyhow::Result;
 
 use crate::models::Pack;
 
+/// A species heard in the background of a recording (Xeno-Canto `also`).
+#[derive(Serialize)]
+pub struct BackgroundBird {
+    pub scientific: String,
+    pub common: Option<String>, // common name if the species is in the library
+}
+
 #[derive(Serialize)]
 pub struct Question {
     pub bird_id: i64,
@@ -19,6 +26,9 @@ pub struct Question {
     pub recordist: Option<String>,
     pub license_url: Option<String>,
     pub location: Option<String>,
+    // Other species audible in the clip. Never offered as wrong options; shown
+    // to the user when the "background birds" option is enabled.
+    pub background: Vec<BackgroundBird>,
 }
 
 #[tauri::command]

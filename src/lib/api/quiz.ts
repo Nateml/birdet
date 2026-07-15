@@ -12,6 +12,8 @@ export type QuestionDto = {
     recordist: string | null;
     license_url: string | null;
     location: string | null;
+    // Other species audible in the clip (never offered as wrong options).
+    background: { scientific: string; common: string | null }[];
 };
 
 // Mirrors Rust `commands::AnswerResult`
