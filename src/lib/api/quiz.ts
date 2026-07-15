@@ -6,6 +6,12 @@ export type QuestionDto = {
     recording_id: number;
     choices: string[];
     is_new: boolean;
+    // Attribution for the played recording (shown after the answer is revealed).
+    source: string | null;
+    xc_id: string | null;
+    recordist: string | null;
+    license_url: string | null;
+    location: string | null;
 };
 
 // Mirrors Rust `commands::AnswerResult`

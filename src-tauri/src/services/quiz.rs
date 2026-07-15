@@ -148,12 +148,16 @@ pub async fn queue_counts(
 // Pick a random recording for the bird and 3 random distractors, returning a
 // ready-to-serve question (the UI shuffles the options).
 async fn build_question(db: &Db, id: i64, name: String, is_new: bool) -> Result<Question> {
-    let recording_id: i64 = sqlx::query_scalar(
-        r#"SELECT id FROM recordings WHERE bird_id = ?1 ORDER BY RANDOM() LIMIT 1"#,
+    // Pull the chosen recording with its attribution (CC credit) in one shot.
+    let rec = sqlx::query(
+        r#"SELECT id AS id, source AS source, xc_id AS xc_id, recordist AS recordist,
+                  license_url AS license_url, location AS location
+           FROM recordings WHERE bird_id = ?1 ORDER BY RANDOM() LIMIT 1"#,
     )
     .bind(id)
     .fetch_one(&db.0)
     .await?;
+    let recording_id: i64 = rec.get("id");
 
     let choices = sqlx::query(
         r#"SELECT common_name FROM birds WHERE id != ?1 ORDER BY RANDOM() LIMIT 3"#,
@@ -168,7 +172,17 @@ async fn build_question(db: &Db, id: i64, name: String, is_new: bool) -> Result<
     let mut options = choices;
     options.push(name);
 
-    Ok(Question { bird_id: id, recording_id, choices: options, is_new })
+    Ok(Question {
+        bird_id: id,
+        recording_id,
+        choices: options,
+        is_new,
+        source: rec.get("source"),
+        xc_id: rec.get("xc_id"),
+        recordist: rec.get("recordist"),
+        license_url: rec.get("license_url"),
+        location: rec.get("location"),
+    })
 }
 
 // --- SM-2 + learning-steps scheduler ------------------------------------

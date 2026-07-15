@@ -12,6 +12,13 @@ pub struct Question {
     pub recording_id: i64,
     pub choices: Vec<String>, // For multiple choice questions
     pub is_new: bool,         // first-ever exposure (counts against the new-card cap)
+    // Attribution for the recording being played (Creative Commons requires
+    // credit). Shown after the answer is revealed so it doesn't hint the bird.
+    pub source: Option<String>,
+    pub xc_id: Option<String>,
+    pub recordist: Option<String>,
+    pub license_url: Option<String>,
+    pub location: Option<String>,
 }
 
 #[tauri::command]
