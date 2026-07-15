@@ -9,6 +9,7 @@
 		deleteBird,
 		searchBirdRecordings,
 		addBirdRecordings,
+		addRecordingByNumber,
 		type RecordingInfo,
 		type RecordingCandidate
 	} from '$lib/api/recordings';
@@ -55,6 +56,11 @@
 	let searched = $state(false);
 	let toAdd = $state<Set<string>>(new Set());
 	let confirmingDeleteBird = $state(false);
+
+	// add by catalogue number
+	let catNr = $state('');
+	let catBusy = $state(false);
+	let catMsg = $state<{ ok: boolean; text: string } | null>(null);
 
 	let loadedId: number | null = null;
 	$effect(() => {
@@ -176,6 +182,37 @@
 		}
 	}
 
+	async function addByNumber() {
+		const input = catNr.trim();
+		if (!input || catBusy || $importJob.active) return;
+		catBusy = true;
+		catMsg = null;
+		try {
+			const res = await runImportJob('recordings', () => addRecordingByNumber(birdId, input));
+			if (!res.added) {
+				catMsg = { ok: false, text: `XC${res.xc_id} is already in your library.` };
+				return;
+			}
+			recordings = await getBirdRecordings(birdId);
+			// Warn if the recording's species doesn't look like this bird — a wrong
+			// catalogue number adds the wrong bird's sound.
+			const mismatch =
+				res.en && bird?.common_name && res.en.toLowerCase() !== bird.common_name.toLowerCase();
+			catMsg = {
+				ok: !mismatch,
+				text: mismatch
+					? `Added XC${res.xc_id}, but Xeno-Canto files it as “${res.en}” — check it's the right species.`
+					: `Added XC${res.xc_id}${res.recordist ? ` by ${res.recordist}` : ''}.`
+			};
+			catNr = '';
+			onChanged?.();
+		} catch (e) {
+			catMsg = { ok: false, text: (e as string) ?? 'Add failed.' };
+		} finally {
+			catBusy = false;
+		}
+	}
+
 	function toggle(xcId: string) {
 		const next = new Set(toAdd);
 		if (next.has(xcId)) next.delete(xcId);
@@ -256,7 +293,26 @@
 
 		{#if adding}
 			<div class="mb-5 rounded-xl border border-be-border bg-be-card p-4">
-				<p class="mb-3 text-xs text-be-muted-fg">Search Xeno-Canto for more recordings of this species.</p>
+				<!-- Add a specific recording straight by its Xeno-Canto catalogue number. -->
+				<p class="mb-2 text-xs font-medium text-be-muted-fg">Add by catalogue number</p>
+				<form onsubmit={(e) => { e.preventDefault(); addByNumber(); }} class="flex flex-wrap items-center gap-2">
+					<input
+						bind:value={catNr}
+						placeholder="e.g. XC123456"
+						class="min-w-0 flex-1 rounded-lg border border-be-border bg-be-bg px-3 py-1.5 text-sm text-be-fg outline-none focus:border-be-primary/40"
+					/>
+					<button type="submit" disabled={catBusy || !catNr.trim() || $importJob.active}
+						class="rounded-lg bg-be-primary px-4 py-1.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50">
+						{catBusy ? 'Adding…' : 'Add'}
+					</button>
+				</form>
+				{#if catMsg}
+					<p class="mt-2 text-xs {catMsg.ok ? 'text-be-accent' : 'text-be-destructive'}">{catMsg.text}</p>
+				{/if}
+
+				<div class="my-4 border-t border-be-border"></div>
+
+				<p class="mb-3 text-xs text-be-muted-fg">Or search Xeno-Canto for more recordings of this species.</p>
 				<div class="flex flex-wrap items-end gap-3">
 					<label class="block">
 						<span class="mb-1 block text-xs font-medium text-be-muted-fg">Min quality</span>

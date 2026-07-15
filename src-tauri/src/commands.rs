@@ -345,6 +345,20 @@ pub async fn add_bird_recordings(
         .map_err(|e| e.to_string())
 }
 
+/// Add one specific Xeno-Canto recording to a bird by its catalogue number
+/// ("XC123", "123", or an XC URL).
+#[tauri::command]
+pub async fn add_recording_by_number(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    bird_id: i64,
+    catalogue: String,
+) -> Result<crate::services::import::AddByNumberResult, String> {
+    crate::services::import::add_recording_by_number(&app, &state.db, bird_id, &catalogue)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Export a pack to a `birdet-pack` JSON file in the user's Downloads folder.
 /// Returns the absolute path written, for display.
 #[tauri::command]

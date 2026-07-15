@@ -62,6 +62,26 @@ export async function addBirdRecordings(birdId: number, xcIds: string[]): Promis
     return await invoke<number>('add_bird_recordings', { birdId, xcIds });
 }
 
+// Mirrors Rust `import::AddByNumberResult`.
+export type AddByNumberResult = {
+    added: boolean; // false = already in the library
+    xc_id: string;
+    recordist: string;
+    en: string; // XC English name of the recording's species
+    xc_name: string; // XC binomial
+    quality: string;
+    rec_type: string;
+};
+
+// Add one specific recording by its Xeno-Canto catalogue number (accepts
+// "XC123456", "123456", or an xeno-canto.org URL).
+export async function addRecordingByNumber(
+    birdId: number,
+    catalogue: string
+): Promise<AddByNumberResult> {
+    return await invoke<AddByNumberResult>('add_recording_by_number', { birdId, catalogue });
+}
+
 export async function backfillRecordingMeta(): Promise<number> {
     return await invoke<number>('backfill_recording_meta');
 }

@@ -61,6 +61,7 @@ fn main() -> anyhow::Result<()> {
             commands::delete_bird,
             commands::search_bird_recordings,
             commands::add_bird_recordings,
+            commands::add_recording_by_number,
             commands::backfill_recording_meta,
             commands::repair_recordings,
             commands::recordings_storage,
