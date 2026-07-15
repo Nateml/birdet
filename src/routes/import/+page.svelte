@@ -251,6 +251,14 @@
 	}
 
 	const pctDone = $derived(progress.total ? (progress.current / progress.total) * 100 : 0);
+
+	// Scroll the completion summary into view once an import finishes.
+	let summaryEl = $state<HTMLElement>();
+	$effect(() => {
+		if (summary && summaryEl) {
+			summaryEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+		}
+	});
 </script>
 
 
@@ -646,7 +654,7 @@
 	{/if}
 
 	{#if summary}
-		<div class="mt-6 rounded-xl border border-be-primary/30 bg-be-primary/[0.06] p-6">
+		<div bind:this={summaryEl} class="mt-6 rounded-xl border border-be-primary/30 bg-be-primary/[0.06] p-6">
 			<h3 class="font-be-serif mb-2 text-lg font-semibold">Import complete</h3>
 			<p class="text-sm text-be-fg">
 				{summary.species_imported} species · {summary.recordings_added} recordings
