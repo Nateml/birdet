@@ -650,7 +650,7 @@
 			<h3 class="font-be-serif mb-2 text-lg font-semibold">Import complete</h3>
 			<p class="text-sm text-be-fg">
 				{summary.species_imported} species · {summary.recordings_added} recordings
-				{#if summary.species_skipped > 0}<span class="text-be-muted-fg"> · {summary.species_skipped} skipped (no audio)</span>{/if}
+				{#if summary.species_skipped > 0}<span class="text-be-muted-fg"> · {summary.species_skipped} skipped (no audio/in library)</span>{/if}{#if summary.pack_id != null}<span class="text-be-muted-fg"> · {summary.added_to_pack} added to pack</span>{/if}
 			</p>
 			{#if summary.name_mismatches?.length > 0}
 				<p class="mt-3 rounded-lg border border-be-accent/40 bg-be-accent/10 px-3 py-2 text-xs text-be-accent">
