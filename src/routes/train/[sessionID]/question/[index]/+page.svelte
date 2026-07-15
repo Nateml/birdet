@@ -9,6 +9,7 @@
 	import { buildSpectrogramBitmap, drawSpectrogramFrame, type Spectrogram } from '$lib/spectrogram';
 	import SpectroWorker from '$lib/spectrogram.worker?worker';
 	import type { QuestionDto } from '$lib/api/quiz';
+	import { licenseLabel, licenseHref, xcUrl } from '$lib/license';
 
 	const id = page.params.sessionID;
 
@@ -744,6 +745,24 @@
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
 				</button>
 			</div>
+			<!-- Recording credit (Creative Commons attribution). Revealed with the
+			     answer so it doesn't hint the bird before you guess. -->
+			{#if question.recordist || question.xc_id}
+				<p class="font-be-mono mt-4 text-center text-[11px] leading-relaxed text-be-muted-fg">
+					Recording
+					{#if xcUrl(question.xc_id)}
+						<a href={xcUrl(question.xc_id)} target="_blank" rel="noopener" class="hover:text-be-fg hover:underline">XC{question.xc_id}</a>
+					{/if}
+					{#if question.recordist}by {question.recordist}{/if}
+					{#if question.location} · {question.location}{/if}
+					{#if licenseLabel(question.license_url)}
+						·
+						<a href={licenseHref(question.license_url)} target="_blank" rel="noopener" class="hover:text-be-fg hover:underline">{licenseLabel(question.license_url)}</a>
+					{/if}
+					· via Xeno-Canto
+				</p>
+			{/if}
+
 			<!-- Escape hatch: the recording was bad — go straight to it to replace it. -->
 			<div class="mt-4 text-center">
 				<button

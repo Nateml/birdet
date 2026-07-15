@@ -13,6 +13,7 @@
 		type RecordingCandidate
 	} from '$lib/api/recordings';
 	import { runImportJob, importJob } from '$lib/stores/importJob';
+	import { licenseLabel, licenseHref } from '$lib/license';
 
 	let {
 		birdId,
@@ -363,9 +364,14 @@
 								{#if r.quality}
 									<span class="font-be-mono rounded-full border border-be-border px-2 py-0.5 text-[11px] leading-none text-be-muted-fg">q:{r.quality}</span>
 								{/if}
+								{#if licenseLabel(r.license_url)}
+									<a href={licenseHref(r.license_url)} target="_blank" rel="noopener"
+										title="Recording licence — click for terms"
+										class="font-be-mono rounded-full border border-be-border px-2 py-0.5 text-[11px] leading-none text-be-muted-fg transition-colors hover:text-be-fg">{licenseLabel(r.license_url)}</a>
+								{/if}
 							</p>
 							{#if r.recordist || r.location}
-								<p class="truncate text-xs text-be-muted-fg">{r.recordist ?? ''}{#if r.recordist && r.location} · {/if}{r.location ?? ''}</p>
+								<p class="truncate text-xs text-be-muted-fg">© {r.recordist ?? 'Unknown'}{#if r.location} · {r.location}{/if} · via Xeno-Canto</p>
 							{/if}
 						</div>
 						{#if confirmDelete === r.id}
