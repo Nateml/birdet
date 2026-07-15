@@ -813,6 +813,47 @@ pub struct RecordingSearch {
 /// Search Xeno-Canto for more recordings of a bird already in the library,
 /// omitting any already downloaded (matched by xc_id). For the per-bird
 /// "add recordings" browser.
+/// Default cap on an imported recording's length, in seconds (1 min 30 s).
+/// Overridable via the `max_recording_seconds` setting; a value of 0 (or less)
+/// disables the limit.
+const DEFAULT_MAX_RECORDING_SECONDS: i64 = 90;
+
+/// The configured maximum recording length in seconds, or the default.
+async fn max_recording_seconds(db: &Db) -> i64 {
+    settings::get_setting(db, "max_recording_seconds")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|s| s.trim().parse::<i64>().ok())
+        .unwrap_or(DEFAULT_MAX_RECORDING_SECONDS)
+}
+
+/// Parse an XC `length` string ("m:ss" or "h:mm:ss") into seconds.
+fn parse_length(s: &str) -> Option<i64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let mut secs = 0i64;
+    for part in s.split(':') {
+        secs = secs * 60 + part.trim().parse::<i64>().ok()?;
+    }
+    Some(secs)
+}
+
+/// Whether a recording is within the length limit. Keeps clips whose length is
+/// missing/unparseable (better to include than silently drop), and treats a
+/// non-positive limit as "no limit".
+fn within_max_len(r: &XcRecording, max_secs: i64) -> bool {
+    if max_secs <= 0 {
+        return true;
+    }
+    match parse_length(&r.length) {
+        Some(secs) => secs <= max_secs,
+        None => true,
+    }
+}
+
 pub async fn search_recordings(
     db: &Db,
     bird_id: i64,
@@ -837,9 +878,10 @@ pub async fn search_recordings(
         xc_recordings_for(&client, &xc_key, &sci, Some(&com), quality.as_deref(), rec_type.as_deref()).await;
     // When we fell back to the English name, note the binomial XC actually uses.
     let xc_name = if name_fallback { recs.iter().find_map(xc_binomial) } else { None };
+    let max_len = max_recording_seconds(db).await;
     let candidates = recs
         .into_iter()
-        .filter(|r| !r.file.is_empty() && !have.contains(&r.id))
+        .filter(|r| !r.file.is_empty() && !have.contains(&r.id) && within_max_len(r, max_len))
         .map(|r| RecordingCandidate {
             xc_id: r.id,
             recordist: r.rec,
@@ -1511,9 +1553,10 @@ async fn fetch_species(
         }
     }
 
+    let max_len = max_recording_seconds(db).await;
     let picks: Vec<XcRecording> = recordings
         .into_iter()
-        .filter(|r| !r.file.is_empty())
+        .filter(|r| !r.file.is_empty() && within_max_len(r, max_len))
         .take(max_per_species.max(1) as usize)
         .collect();
 
@@ -1726,6 +1769,16 @@ mod tests {
         assert_eq!(extract_xc_number("nr=555").as_deref(), Some("555"));
         assert_eq!(extract_xc_number("Mallard"), None);
         assert_eq!(extract_xc_number(""), None);
+    }
+
+    #[test]
+    fn length_parses_to_seconds() {
+        assert_eq!(parse_length("0:09"), Some(9));
+        assert_eq!(parse_length("1:30"), Some(90));
+        assert_eq!(parse_length("2:05"), Some(125));
+        assert_eq!(parse_length("1:00:00"), Some(3600));
+        assert_eq!(parse_length(""), None);
+        assert_eq!(parse_length("bad"), None);
     }
 
     #[test]

@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { setup } from '$lib/stores/setup';
-	import { getSetting, setSetting, SETTING_EBIRD_KEY, SETTING_XC_KEY } from '$lib/api/settings';
+	import {
+		getSetting,
+		setSetting,
+		SETTING_EBIRD_KEY,
+		SETTING_XC_KEY,
+		SETTING_MAX_RECORDING_SECONDS,
+		DEFAULT_MAX_RECORDING_SECONDS
+	} from '$lib/api/settings';
 	import { backfillRecordingMeta, repairRecordings } from '$lib/api/recordings';
 	import { updateState, checkForUpdate, installUpdate } from '$lib/stores/updater';
 	import logo from '$lib/assets/logo.svg';
@@ -16,12 +23,29 @@
 	let xcKey = $state('');
 	let savedKey = $state<string | null>(null); // which key just saved (for the ✓)
 
+	// Max recording length (seconds) applied when importing/searching XC recordings.
+	let maxLen = $state(DEFAULT_MAX_RECORDING_SECONDS);
+	let maxLenSaved = $state(false);
+
 	onMount(async () => {
-		[ebirdKey, xcKey] = await Promise.all([
+		const [eb, xc, ml] = await Promise.all([
 			getSetting(SETTING_EBIRD_KEY),
-			getSetting(SETTING_XC_KEY)
+			getSetting(SETTING_XC_KEY),
+			getSetting(SETTING_MAX_RECORDING_SECONDS)
 		]);
+		ebirdKey = eb;
+		xcKey = xc;
+		const n = parseInt(ml, 10);
+		maxLen = Number.isFinite(n) && ml.trim() !== '' ? n : DEFAULT_MAX_RECORDING_SECONDS;
 	});
+
+	async function saveMaxLen() {
+		const v = Math.max(0, Math.round(maxLen) || 0);
+		maxLen = v;
+		await setSetting(SETTING_MAX_RECORDING_SECONDS, String(v));
+		maxLenSaved = true;
+		setTimeout(() => (maxLenSaved = false), 1500);
+	}
 
 	async function saveKey(key: string, value: string) {
 		await setSetting(key, value.trim());
@@ -215,6 +239,34 @@
 				autocomplete="off"
 				class="w-full rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none focus:border-be-primary/40"
 			/>
+		</label>
+	</div>
+
+	<!-- Import options -->
+	<div class="mb-6 rounded-xl border border-be-border bg-be-card p-6">
+		<p class="font-be-mono mb-4 text-xs uppercase tracking-widest text-be-muted-fg">Import</p>
+		<label class="flex items-center justify-between gap-4">
+			<span>
+				<span class="flex items-center gap-2 text-sm font-medium">
+					Max recording length
+					{#if maxLenSaved}<span class="text-xs text-be-primary">saved ✓</span>{/if}
+				</span>
+				<span class="block text-xs text-be-muted-fg">
+					Skip Xeno-Canto recordings longer than this when importing or searching. Set 0 for no limit.
+					{#if maxLen > 0}<span class="font-be-mono"> · {Math.floor(maxLen / 60)}:{String(maxLen % 60).padStart(2, '0')}</span>{/if}
+				</span>
+			</span>
+			<span class="flex shrink-0 items-center gap-1.5">
+				<input
+					type="number"
+					min="0"
+					step="5"
+					bind:value={maxLen}
+					onblur={saveMaxLen}
+					class="w-20 rounded-lg border border-be-border bg-be-bg px-3 py-1.5 text-right text-sm text-be-fg outline-none focus:border-be-primary/40"
+				/>
+				<span class="text-xs text-be-muted-fg">sec</span>
+			</span>
 		</label>
 	</div>
 
