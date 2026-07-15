@@ -100,6 +100,8 @@ pub struct ImportParams {
     pub create_pack: bool,          // auto-create a pack from the import
     #[serde(default = "default_true")]
     pub skip_existing: bool,        // skip species already in the library (fill the cap with new ones)
+    #[serde(default)]
+    pub pack_include_skipped: bool, // fold already-owned (skipped) birds into the created pack
 }
 
 fn default_true() -> bool {
@@ -298,6 +300,9 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
     };
     let mut taxa_by_code: std::collections::HashMap<String, Taxon> = std::collections::HashMap::new();
     let mut targets: Vec<String> = Vec::new();
+    // Owned birds skipped during selection, kept so they can optionally be
+    // folded into the created pack (family-filtered, same as targets).
+    let mut skipped_codes: Vec<String> = Vec::new();
     for chunk in ranked.chunks(100) {
         let joined = chunk.join(",");
         let taxa: Vec<Taxon> = client
@@ -317,9 +322,6 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
             if targets.len() >= cap {
                 break;
             }
-            if owned.contains(code) {
-                continue; // already in the library — don't spend the cap on it
-            }
             let Some(t) = taxa_by_code.get(code) else { continue }; // no name
             if !family_filters.is_empty() {
                 let fam_lc = t.family_com_name.as_ref().map(|f| f.to_lowercase());
@@ -331,6 +333,14 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
                     continue;
                 }
             }
+            if owned.contains(code) {
+                // already in the library — don't spend the cap on it, but
+                // optionally remember it so it lands in the created pack.
+                if params.pack_include_skipped {
+                    skipped_codes.push(code.clone());
+                }
+                continue;
+            }
             targets.push(code.clone());
         }
         if targets.len() >= cap {
@@ -338,7 +348,10 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
         }
     }
 
-    if targets.is_empty() {
+    // Nothing new to import. Allowed to continue only if we still have skipped
+    // birds to fold into a pack — otherwise there's genuinely nothing to do.
+    let have_pack_skips = params.create_pack && params.pack_include_skipped && !skipped_codes.is_empty();
+    if targets.is_empty() && !have_pack_skips {
         return Err(if params.skip_existing && !owned.is_empty() {
             anyhow!("No new species matched — you may already have them all. Turn off “skip existing” to re-import.")
         } else {
@@ -362,13 +375,28 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
         .await?;
     let total = taxa.len() as i64;
 
-    let pack_id = if params.create_pack && !imported_bird_ids.is_empty() {
+    // Combine freshly-imported birds with any skipped (already-owned) ones the
+    // user asked to fold in, so the pack covers the whole region/family.
+    let mut pack_bird_ids = imported_bird_ids.clone();
+    if params.pack_include_skipped {
+        for code in &skipped_codes {
+            if let Some(id) = sqlx::query_scalar::<_, i64>("SELECT id FROM birds WHERE ebird_code = ?1")
+                .bind(code)
+                .fetch_optional(&db.0)
+                .await?
+            {
+                pack_bird_ids.push(id);
+            }
+        }
+    }
+
+    let pack_id = if params.create_pack && !pack_bird_ids.is_empty() {
         let name = format!(
             "{} · {} species",
             params.family.clone().unwrap_or_else(|| params.region.clone()),
-            species_imported
+            pack_bird_ids.len()
         );
-        Some(crate::services::packs::create_pack_from_birds(db, &name, &imported_bird_ids).await?)
+        Some(crate::services::packs::create_pack_from_birds(db, &name, &pack_bird_ids).await?)
     } else {
         None
     };

@@ -25,6 +25,7 @@
 	let maxSpecies = $state(20);
 	let createPack = $state(true);
 	let skipExisting = $state(true);
+	let packIncludeSkipped = $state(false);
 
 	// Shared XC filters (both modes)
 	let maxPerSpecies = $state(1);
@@ -148,7 +149,8 @@
 					rec_type: recType || null,
 					family: family.trim() || null,
 					create_pack: createPack,
-					skip_existing: skipExisting
+					skip_existing: skipExisting,
+					pack_include_skipped: skipExisting && packIncludeSkipped
 				})
 			);
 		} catch (e) {
@@ -340,6 +342,18 @@
 			<label class="mt-4 flex items-center gap-2.5">
 				<input type="checkbox" bind:checked={skipExisting} disabled={running} class="accent-be-primary" />
 				<span class="text-sm">Skip birds already in my library <span class="text-be-muted-fg">(fill the cap with new species)</span></span>
+			</label>
+
+			<label
+				class="mt-3 ml-6 flex items-center gap-2.5 {!skipExisting ? 'opacity-50' : ''}"
+			>
+				<input
+					type="checkbox"
+					bind:checked={packIncludeSkipped}
+					disabled={running || !skipExisting}
+					class="accent-be-primary"
+				/>
+				<span class="text-sm">Still add skipped birds to the pack <span class="text-be-muted-fg">(include ones you already have)</span></span>
 			</label>
 
 			<label class="mt-3 flex items-center gap-2.5">
