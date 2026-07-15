@@ -10,6 +10,7 @@
 	import SpectroWorker from '$lib/spectrogram.worker?worker';
 	import type { QuestionDto } from '$lib/api/quiz';
 	import { licenseLabel, licenseHref, xcUrl } from '$lib/license';
+	import { scale } from 'svelte/transition';
 
 	const id = page.params.sessionID;
 
@@ -41,6 +42,15 @@
 	const newServed = $derived($session?.newServed ?? 0);
 	const answered = $derived($session?.answers ?? []);
 	const scoreSoFar = $derived(answered.filter((a) => a.correct).length);
+	// Current run of consecutive correct answers (trailing streak) this session.
+	const streak = $derived.by(() => {
+		let n = 0;
+		for (let i = answered.length - 1; i >= 0; i--) {
+			if (answered[i].correct) n++;
+			else break;
+		}
+		return n;
+	});
 	const study = $derived($session?.config.study ?? 'mixed');
 	const isCram = $derived(study === 'cram');
 	// Whether the card on screen is a brand-new bird vs a scheduled review.
@@ -602,6 +612,22 @@
 			</div>
 		{:else}
 			<div class="mb-7"></div>
+		{/if}
+
+		<!-- Streak banner: a persistent, prominent flame + count above the
+		     spectrogram, growing as the run climbs. Hidden below 2 so a single
+		     correct answer isn't noisy; resets the moment a wrong/skip breaks it. -->
+		{#if streak >= 2}
+			{#key streak}
+				<div
+					in:scale={{ duration: 260, start: 0.7 }}
+					class="mb-4 flex items-center justify-center gap-2 rounded-xl border border-be-accent/40 bg-be-accent/10 px-4 py-2.5 text-be-accent shadow-[0_0_20px_-6px_var(--color-be-accent)]"
+					title="{streak} correct in a row"
+				>
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c1 3-1 4.5-2.5 6C8 9.5 7 11 7 13a5 5 0 0 0 10 0c0-1.7-.7-3.2-1.7-4.4.2 1.2-.3 2.2-1.1 2.6.3-1.6-.2-3.9-2.2-5.2C11.5 5.4 12.6 3.6 12 2Z"/></svg>
+					<span class="font-be-mono text-sm font-bold tracking-wide">{streak} in a row</span>
+				</div>
+			{/key}
 		{/if}
 
 		<!-- Spectrogram -->
