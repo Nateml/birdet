@@ -43,6 +43,7 @@
 	let playingId = $state<number | null>(null);
 	let curUrl: string | null = null;
 	let confirmDelete = $state<number | null>(null);
+	let expandedId = $state<number | null>(null);
 
 	// add panel
 	let adding = $state(false);
@@ -61,6 +62,50 @@
 	let catNr = $state('');
 	let catBusy = $state(false);
 	let catMsg = $state<{ ok: boolean; text: string } | null>(null);
+
+	// Recording durations aren't stored server-side, so read each clip's audio
+	// metadata once (headers only) and cache it to show a length chip.
+	let durations = $state<Record<number, number>>({});
+	const durationCache = new Map<number, number>();
+
+	function fmtDur(sec: number): string {
+		const s = Math.round(sec);
+		return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+	}
+
+	function audioDuration(url: string): Promise<number> {
+		return new Promise((resolve, reject) => {
+			const a = new Audio();
+			a.preload = 'metadata';
+			a.onloadedmetadata = () => resolve(a.duration);
+			a.onerror = () => reject(new Error('metadata load failed'));
+			a.src = url;
+		});
+	}
+
+	async function refreshDurations() {
+		await Promise.all(
+			recordings.map(async (r) => {
+				if (durationCache.has(r.id)) {
+					durations = { ...durations, [r.id]: durationCache.get(r.id)! };
+					return;
+				}
+				let url: string | null = null;
+				try {
+					url = await getRecordingBlobUrl(r.id);
+					const secs = await audioDuration(url);
+					if (Number.isFinite(secs) && secs > 0) {
+						durationCache.set(r.id, secs);
+						durations = { ...durations, [r.id]: secs };
+					}
+				} catch {
+					/* skip — the chip just won't show for this one */
+				} finally {
+					if (url) URL.revokeObjectURL(url);
+				}
+			})
+		);
+	}
 
 	let loadedId: number | null = null;
 	$effect(() => {
@@ -81,6 +126,7 @@
 		if (!recordings.some((r) => r.id === target)) return;
 		flashedFor = target;
 		flashId = target;
+		expandedId = target; // open the details for the recording we jumped to
 		void tick().then(() =>
 			document
 				.getElementById(`rec-${target}`)
@@ -117,6 +163,7 @@
 			bird = birds.find((b) => b.id === birdId) ?? null;
 			if (!bird) throw new Error('Bird not found.');
 			recordings = await getBirdRecordings(birdId);
+			void refreshDurations();
 		} catch (e) {
 			error = (e as Error)?.message ?? (e as string) ?? 'Failed to load bird.';
 		} finally {
@@ -194,6 +241,7 @@
 				return;
 			}
 			recordings = await getBirdRecordings(birdId);
+			void refreshDurations();
 			// Warn if the recording's species doesn't look like this bird — a wrong
 			// catalogue number adds the wrong bird's sound.
 			const mismatch =
@@ -229,6 +277,7 @@
 			// indicator and can't overlap another import.
 			await runImportJob('recordings', () => addBirdRecordings(birdId, [...toAdd]));
 			recordings = await getBirdRecordings(birdId);
+			void refreshDurations();
 			candidates = candidates.filter((c) => !toAdd.has(c.xc_id));
 			toAdd = new Set();
 			onChanged?.();
@@ -393,54 +442,102 @@
 		{:else}
 			<div class="divide-y divide-be-border overflow-hidden rounded-xl border border-be-border bg-be-card">
 				{#each recordings as r (r.id)}
+					{@const expanded = expandedId === r.id}
 					<div
 						id="rec-{r.id}"
-						class="flex items-center gap-3 px-4 py-3 transition-colors duration-500 {flashId === r.id
-							? 'bg-be-primary/10'
-							: ''}"
+						class="transition-colors duration-500 {flashId === r.id ? 'bg-be-primary/10' : ''}"
 					>
-						<button onclick={() => play(r.id)} title={playingId === r.id ? 'Pause' : 'Play'}
-							class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-be-border text-be-fg transition-colors hover:border-be-primary/40 hover:text-be-primary">
-							{#if playingId === r.id}
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
-							{:else}
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-							{/if}
-						</button>
-						<div class="min-w-0 flex-1">
-							<p class="flex flex-wrap items-center gap-2 text-sm">
-								{#if r.xc_id}
-									<a href="https://xeno-canto.org/{r.xc_id}" target="_blank" rel="noopener" class="font-medium hover:text-be-primary hover:underline">XC{r.xc_id}</a>
+						<div class="flex items-center gap-3 px-4 py-3">
+							<button onclick={() => play(r.id)} title={playingId === r.id ? 'Pause' : 'Play'}
+								class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-be-border text-be-fg transition-colors hover:border-be-primary/40 hover:text-be-primary">
+								{#if playingId === r.id}
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
 								{:else}
-									<span class="font-medium">{r.filename ?? `#${r.id}`}</span>
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
 								{/if}
-								{#if r.rec_type}
-									<span class="rounded-full bg-be-secondary px-2 py-0.5 text-[11px] font-medium capitalize leading-none text-be-muted-fg">{r.rec_type}</span>
-								{/if}
-								{#if r.quality}
-									<span class="font-be-mono rounded-full border border-be-border px-2 py-0.5 text-[11px] leading-none text-be-muted-fg">q:{r.quality}</span>
-								{/if}
-								{#if licenseLabel(r.license_url)}
-									<a href={licenseHref(r.license_url)} target="_blank" rel="noopener"
-										title="Recording licence — click for terms"
-										class="font-be-mono rounded-full border border-be-border px-2 py-0.5 text-[11px] leading-none text-be-muted-fg transition-colors hover:text-be-fg">{licenseLabel(r.license_url)}</a>
-								{/if}
-							</p>
-							{#if r.recordist || r.location}
-								<p class="truncate text-xs text-be-muted-fg">© {r.recordist ?? 'Unknown'}{#if r.location} · {r.location}{/if} · via Xeno-Canto</p>
+							</button>
+							<!-- Click the summary to expand a full, untruncated details card. -->
+							<button
+								onclick={() => (expandedId = expanded ? null : r.id)}
+								aria-expanded={expanded}
+								title={expanded ? 'Hide details' : 'Show details'}
+								class="flex min-w-0 flex-1 items-center gap-2 text-left"
+							>
+								<span class="min-w-0 flex-1">
+									<span class="flex flex-wrap items-center gap-2 text-sm">
+										<span class="font-medium">{r.xc_id ? `XC${r.xc_id}` : (r.filename ?? `#${r.id}`)}</span>
+										{#if durations[r.id]}
+											<span class="font-be-mono rounded-full border border-be-border px-2 py-0.5 text-[11px] leading-none text-be-muted-fg">{fmtDur(durations[r.id])}</span>
+										{/if}
+										{#if r.rec_type}
+											<span class="rounded-full bg-be-secondary px-2 py-0.5 text-[11px] font-medium capitalize leading-none text-be-muted-fg">{r.rec_type}</span>
+										{/if}
+										{#if r.quality}
+											<span class="font-be-mono rounded-full border border-be-border px-2 py-0.5 text-[11px] leading-none text-be-muted-fg">q:{r.quality}</span>
+										{/if}
+										{#if licenseLabel(r.license_url)}
+											<span class="font-be-mono rounded-full border border-be-border px-2 py-0.5 text-[11px] leading-none text-be-muted-fg">{licenseLabel(r.license_url)}</span>
+										{/if}
+									</span>
+									{#if r.recordist || r.location}
+										<span class="mt-0.5 block truncate text-xs text-be-muted-fg">© {r.recordist ?? 'Unknown'}{#if r.location} · {r.location}{/if} · via Xeno-Canto</span>
+									{/if}
+								</span>
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+									class="shrink-0 text-be-muted-fg transition-transform duration-200 {expanded ? 'rotate-180' : ''}"><path d="m6 9 6 6 6-6"/></svg>
+							</button>
+							{#if confirmDelete === r.id}
+								<button onclick={() => remove(r.id)} disabled={busy}
+									class="shrink-0 rounded-md bg-be-destructive px-2.5 py-1 text-xs font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50">Delete</button>
+								<button onclick={() => (confirmDelete = null)}
+									class="shrink-0 rounded-md border border-be-border px-2.5 py-1 text-xs transition-colors hover:bg-be-secondary">Cancel</button>
+							{:else}
+								<button onclick={() => (confirmDelete = r.id)} disabled={busy || recordings.length <= 1}
+									title={recordings.length <= 1 ? "Can't delete the only recording" : 'Delete recording'}
+									class="shrink-0 rounded-md p-1.5 text-be-muted-fg transition-colors hover:bg-be-destructive/10 hover:text-be-destructive disabled:cursor-not-allowed disabled:opacity-30">
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+								</button>
 							{/if}
 						</div>
-						{#if confirmDelete === r.id}
-							<button onclick={() => remove(r.id)} disabled={busy}
-								class="shrink-0 rounded-md bg-be-destructive px-2.5 py-1 text-xs font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50">Delete</button>
-							<button onclick={() => (confirmDelete = null)}
-								class="shrink-0 rounded-md border border-be-border px-2.5 py-1 text-xs transition-colors hover:bg-be-secondary">Cancel</button>
-						{:else}
-							<button onclick={() => (confirmDelete = r.id)} disabled={busy || recordings.length <= 1}
-								title={recordings.length <= 1 ? "Can't delete the only recording" : 'Delete recording'}
-								class="shrink-0 rounded-md p-1.5 text-be-muted-fg transition-colors hover:bg-be-destructive/10 hover:text-be-destructive disabled:cursor-not-allowed disabled:opacity-30">
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
-							</button>
+
+						{#if expanded}
+							<!-- Full recording details — every field, none truncated. -->
+							<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 border-t border-be-border bg-be-bg/40 px-4 py-3 text-sm">
+								<dt class="text-xs text-be-muted-fg">Recordist</dt>
+								<dd>{r.recordist ?? 'Unknown'}</dd>
+								{#if r.location}
+									<dt class="text-xs text-be-muted-fg">Location</dt>
+									<dd>{r.location}</dd>
+								{/if}
+								{#if durations[r.id]}
+									<dt class="text-xs text-be-muted-fg">Duration</dt>
+									<dd class="font-be-mono">{fmtDur(durations[r.id])}</dd>
+								{/if}
+								{#if r.rec_type}
+									<dt class="text-xs text-be-muted-fg">Type</dt>
+									<dd class="capitalize">{r.rec_type}</dd>
+								{/if}
+								{#if r.quality}
+									<dt class="text-xs text-be-muted-fg">Quality</dt>
+									<dd class="font-be-mono">{r.quality}</dd>
+								{/if}
+								{#if licenseLabel(r.license_url)}
+									<dt class="text-xs text-be-muted-fg">Licence</dt>
+									<dd>
+										<a href={licenseHref(r.license_url)} target="_blank" rel="noopener" class="text-be-primary hover:underline">{licenseLabel(r.license_url)}</a>
+									</dd>
+								{/if}
+								{#if r.xc_id}
+									<dt class="text-xs text-be-muted-fg">Source</dt>
+									<dd>
+										<a href="https://xeno-canto.org/{r.xc_id}" target="_blank" rel="noopener" class="text-be-primary hover:underline">Xeno-Canto XC{r.xc_id}</a>
+									</dd>
+								{/if}
+								{#if r.filename}
+									<dt class="text-xs text-be-muted-fg">File</dt>
+									<dd class="font-be-mono break-all text-xs text-be-muted-fg">{r.filename}</dd>
+								{/if}
+							</dl>
 						{/if}
 					</div>
 				{/each}
