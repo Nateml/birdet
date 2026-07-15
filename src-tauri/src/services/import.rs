@@ -166,6 +166,8 @@ struct XcRecording {
     gen: String, // XC genus
     #[serde(default)]
     sp: String, // XC species epithet
+    #[serde(default)]
+    en: String, // XC English name
 }
 
 /// The scientific name Xeno-Canto files a recording under ("Genus species"),
@@ -892,6 +894,97 @@ pub async fn add_recordings(
     Ok(added)
 }
 
+/// Parse an XC catalogue number from user input: "XC123456", "123456", or a
+/// xeno-canto.org URL/path. Returns just the digits.
+fn extract_xc_number(input: &str) -> Option<String> {
+    let s = input.trim();
+    // For a URL/path, the number is the last segment; split on the usual
+    // delimiters so "xeno-canto.org/123456", "…?nr=123456" etc. all work.
+    let tail = s.rsplit(['/', '=', ':', '?', '#']).next().unwrap_or(s).trim();
+    let tail = tail
+        .strip_prefix("XC")
+        .or_else(|| tail.strip_prefix("xc"))
+        .unwrap_or(tail);
+    let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        None
+    } else {
+        Some(digits)
+    }
+}
+
+/// Result of adding a single recording by its catalogue number, for a UI
+/// confirmation (and a species-mismatch warning if it differs from the bird).
+#[derive(Serialize)]
+pub struct AddByNumberResult {
+    pub added: bool, // false = the recording was already in the library
+    pub xc_id: String,
+    pub recordist: String,
+    pub en: String,      // XC English name of the recording's species
+    pub xc_name: String, // XC binomial (genus species)
+    pub quality: String,
+    pub rec_type: String,
+}
+
+/// Add one specific Xeno-Canto recording to a bird by its catalogue number
+/// (fetched directly via `nr:`, so it works even if the recording wouldn't
+/// surface in a species search). Input may be "XC123", "123", or an XC URL.
+pub async fn add_recording_by_number(
+    app: &AppHandle,
+    db: &Db,
+    bird_id: i64,
+    input: &str,
+) -> Result<AddByNumberResult> {
+    let xc_id = extract_xc_number(input)
+        .ok_or_else(|| anyhow!("\"{}\" is not a Xeno-Canto catalogue number.", input.trim()))?;
+    let xc_key = settings::get_setting(db, "xc_api_key")
+        .await?
+        .filter(|k| !k.trim().is_empty())
+        .ok_or_else(|| anyhow!("Missing Xeno-Canto API key — add it in Settings."))?;
+    let client = regions::build_client()?;
+
+    let rec = xc_recording_by_id(&client, &xc_key, &xc_id)
+        .await
+        .ok_or_else(|| anyhow!("No Xeno-Canto recording XC{}.", xc_id))?;
+    let result = |added| AddByNumberResult {
+        added,
+        xc_id: rec.id.clone(),
+        recordist: rec.rec.clone(),
+        en: rec.en.clone(),
+        xc_name: xc_binomial(&rec).unwrap_or_default(),
+        quality: rec.q.clone(),
+        rec_type: rec.rec_type.clone(),
+    };
+
+    // Recordings carry a globally-unique xc_id (one recording → one bird), so a
+    // match anywhere means it's already in the library; report without adding.
+    let existing: Option<i64> = sqlx::query_scalar("SELECT id FROM recordings WHERE xc_id = ?1")
+        .bind(&xc_id)
+        .fetch_optional(&db.0)
+        .await?;
+    if existing.is_some() {
+        return Ok(result(false));
+    }
+    if rec.file.is_empty() {
+        return Err(anyhow!("XC{} has no downloadable audio.", xc_id));
+    }
+
+    let rec_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| anyhow!("app data dir: {}", e))?
+        .join("recordings");
+    std::fs::create_dir_all(&rec_dir)?;
+
+    let file_url = xc_file_url(&rec.file);
+    let filename = recording_file_name(&rec.id, &rec.file_name);
+    download_to(&client, &xc_key, &file_url, &rec_dir.join(&filename))
+        .await
+        .map_err(|e| anyhow!("Couldn't download XC{}: {}", xc_id, e))?;
+    insert_recording(db, bird_id, &filename, &rec).await?;
+    Ok(result(true))
+}
+
 /// Back-fill quality + type on existing recordings that predate those columns.
 /// One Xeno-Canto query per bird (not per recording): fetch the species' list,
 /// map xc_id → (q, type), update matching rows. Paced for the XC rate limit.
@@ -1605,6 +1698,19 @@ mod tests {
         assert_eq!(extract_region_code("US-NY-109").as_deref(), Some("US-NY-109"));
         assert_eq!(extract_region_code("L12345").as_deref(), Some("L12345"));
         assert_eq!(extract_region_code("Turdus migratorius"), None); // has a space
+    }
+
+    #[test]
+    fn xc_number_from_id_prefix_and_url() {
+        assert_eq!(extract_xc_number("XC123456").as_deref(), Some("123456"));
+        assert_eq!(extract_xc_number("xc123456").as_deref(), Some("123456"));
+        assert_eq!(extract_xc_number("123456").as_deref(), Some("123456"));
+        assert_eq!(extract_xc_number("  XC98 ").as_deref(), Some("98"));
+        assert_eq!(extract_xc_number("https://xeno-canto.org/123456").as_deref(), Some("123456"));
+        assert_eq!(extract_xc_number("https://xeno-canto.org/123456/download").as_deref(), None); // trailing segment isn't the number
+        assert_eq!(extract_xc_number("nr=555").as_deref(), Some("555"));
+        assert_eq!(extract_xc_number("Mallard"), None);
+        assert_eq!(extract_xc_number(""), None);
     }
 
     #[test]
