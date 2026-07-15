@@ -11,6 +11,7 @@ export type RecordingInfo = {
     location: string | null;
     quality: string | null;
     rec_type: string | null;
+    background: string[]; // other species in the clip (scientific names)
 };
 
 // Mirrors Rust `import::RecordingCandidate`.

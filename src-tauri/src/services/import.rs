@@ -168,6 +168,8 @@ struct XcRecording {
     sp: String, // XC species epithet
     #[serde(default)]
     en: String, // XC English name
+    #[serde(default)]
+    also: Vec<String>, // other species in the background (scientific names)
 }
 
 /// The scientific name Xeno-Canto files a recording under ("Genus species"),
@@ -996,10 +998,11 @@ pub async fn backfill_recording_meta(db: &Db) -> Result<i64> {
         .ok_or_else(|| anyhow!("Missing Xeno-Canto API key — add it in Settings."))?;
     let client = regions::build_client()?;
 
-    // Birds that have at least one XC recording still missing quality AND type.
+    // Birds with an XC recording still missing quality, type, or background.
     let bird_ids: Vec<i64> = sqlx::query_scalar(
         r#"SELECT DISTINCT bird_id FROM recordings
-           WHERE xc_id IS NOT NULL AND quality IS NULL AND rec_type IS NULL"#,
+           WHERE xc_id IS NOT NULL
+             AND (quality IS NULL OR rec_type IS NULL OR background_json IS NULL)"#,
     )
     .fetch_all(&db.0)
     .await?;
@@ -1011,31 +1014,35 @@ pub async fn backfill_recording_meta(db: &Db) -> Result<i64> {
             Err(_) => continue,
         };
         let (recs, _) = xc_recordings_for(&client, &xc_key, &sci, Some(&com), None, None).await;
-        let meta: std::collections::HashMap<String, (String, String)> = recs
-            .into_iter()
-            .map(|r| (r.id, (r.q, r.rec_type)))
-            .collect();
+        let meta: std::collections::HashMap<String, XcRecording> =
+            recs.into_iter().map(|r| (r.id.clone(), r)).collect();
 
         // Rows for this bird still needing a backfill.
         let rows: Vec<(i64, String)> = sqlx::query_as(
             r#"SELECT id, xc_id FROM recordings
-               WHERE bird_id = ?1 AND xc_id IS NOT NULL AND quality IS NULL AND rec_type IS NULL"#,
+               WHERE bird_id = ?1 AND xc_id IS NOT NULL
+                 AND (quality IS NULL OR rec_type IS NULL OR background_json IS NULL)"#,
         )
         .bind(bird_id)
         .fetch_all(&db.0)
         .await?;
 
         for (rec_id, xc_id) in rows {
-            if let Some((q, t)) = meta.get(&xc_id) {
-                if q.is_empty() && t.is_empty() {
-                    continue;
-                }
-                sqlx::query("UPDATE recordings SET quality = ?1, rec_type = ?2 WHERE id = ?3")
-                    .bind(if q.is_empty() { None } else { Some(q.clone()) })
-                    .bind(if t.is_empty() { None } else { Some(t.clone()) })
-                    .bind(rec_id)
-                    .execute(&db.0)
-                    .await?;
+            if let Some(r) = meta.get(&xc_id) {
+                // COALESCE keeps any value already set; only fills the NULL columns.
+                sqlx::query(
+                    r#"UPDATE recordings
+                       SET quality         = COALESCE(quality, ?1),
+                           rec_type        = COALESCE(rec_type, ?2),
+                           background_json = COALESCE(background_json, ?3)
+                       WHERE id = ?4"#,
+                )
+                .bind(if r.q.is_empty() { None } else { Some(r.q.clone()) })
+                .bind(if r.rec_type.is_empty() { None } else { Some(r.rec_type.clone()) })
+                .bind(background_json(&r.also))
+                .bind(rec_id)
+                .execute(&db.0)
+                .await?;
                 updated += 1;
             }
         }
@@ -1223,6 +1230,13 @@ pub struct RecordingInfo {
     pub location: Option<String>,
     pub quality: Option<String>,
     pub rec_type: Option<String>,
+    pub background: Vec<String>, // other species in the clip (scientific names)
+}
+
+/// Parse a stored `background_json` column into a list of scientific names.
+fn parse_background(json: Option<String>) -> Vec<String> {
+    json.and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+        .unwrap_or_default()
 }
 
 /// All recordings stored for a bird.
@@ -1230,7 +1244,7 @@ pub async fn get_bird_recordings(db: &Db, bird_id: i64) -> Result<Vec<RecordingI
     let rows = sqlx::query(
         r#"SELECT id AS id, filename AS filename, source AS source, xc_id AS xc_id,
                   recordist AS recordist, license_url AS license_url, location AS location,
-                  quality AS quality, rec_type AS rec_type
+                  quality AS quality, rec_type AS rec_type, background_json AS background_json
            FROM recordings WHERE bird_id = ?1 ORDER BY id"#,
     )
     .bind(bird_id)
@@ -1249,6 +1263,7 @@ pub async fn get_bird_recordings(db: &Db, bird_id: i64) -> Result<Vec<RecordingI
             location: row.get("location"),
             quality: row.get("quality"),
             rec_type: row.get("rec_type"),
+            background: parse_background(row.get("background_json")),
         })
         .collect())
 }
@@ -1741,6 +1756,22 @@ mod tests {
     }
 }
 
+/// Serialize XC's `also` (background species) to a JSON array string for
+/// storage, dropping blanks and "identity unknown" placeholders. `None` when
+/// there are no usable background species.
+fn background_json(also: &[String]) -> Option<String> {
+    let names: Vec<&str> = also
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("identity unknown"))
+        .collect();
+    if names.is_empty() {
+        None
+    } else {
+        serde_json::to_string(&names).ok()
+    }
+}
+
 async fn insert_recording(db: &Db, bird_id: i64, filename: &str, r: &XcRecording) -> Result<()> {
     let exists: Option<i64> = sqlx::query_scalar("SELECT id FROM recordings WHERE xc_id = ?1")
         .bind(&r.id)
@@ -1750,8 +1781,8 @@ async fn insert_recording(db: &Db, bird_id: i64, filename: &str, r: &XcRecording
         return Ok(());
     }
     sqlx::query(
-        r#"INSERT INTO recordings (bird_id, filename, location, source, xc_id, recordist, license_url, quality, rec_type)
-           VALUES (?1, ?2, ?3, 'xeno-canto', ?4, ?5, ?6, ?7, ?8)"#,
+        r#"INSERT INTO recordings (bird_id, filename, location, source, xc_id, recordist, license_url, quality, rec_type, background_json)
+           VALUES (?1, ?2, ?3, 'xeno-canto', ?4, ?5, ?6, ?7, ?8, ?9)"#,
     )
     .bind(bird_id)
     .bind(filename)
@@ -1761,6 +1792,7 @@ async fn insert_recording(db: &Db, bird_id: i64, filename: &str, r: &XcRecording
     .bind(if r.lic.is_empty() { None } else { Some(r.lic.clone()) })
     .bind(if r.q.is_empty() { None } else { Some(r.q.clone()) })
     .bind(if r.rec_type.is_empty() { None } else { Some(r.rec_type.clone()) })
+    .bind(background_json(&r.also))
     .execute(&db.0)
     .await?;
     Ok(())
