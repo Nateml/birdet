@@ -1033,7 +1033,7 @@ pub async fn add_recording_by_number(
 /// One Xeno-Canto query per bird (not per recording): fetch the species' list,
 /// map xc_id → (q, type), update matching rows. Paced for the XC rate limit.
 /// Returns the number of recordings updated.
-pub async fn backfill_recording_meta(db: &Db) -> Result<i64> {
+pub async fn backfill_recording_meta(app: &AppHandle, db: &Db) -> Result<i64> {
     let xc_key = settings::get_setting(db, "xc_api_key")
         .await?
         .filter(|k| !k.trim().is_empty())
@@ -1049,12 +1049,25 @@ pub async fn backfill_recording_meta(db: &Db) -> Result<i64> {
     .fetch_all(&db.0)
     .await?;
 
+    let total = bird_ids.len() as i64;
+    emit(app, "backfill", format!("Backfilling {} species…", total), 0, total);
+
+    // Pace the XC queries with the same gate the importer uses (≥ XC_API_MIN_INTERVAL
+    // between queries) instead of a fixed per-bird sleep.
+    let throttle = Throttle::new();
+
     let mut updated = 0i64;
-    for bird_id in bird_ids {
+    for (idx, bird_id) in bird_ids.into_iter().enumerate() {
+        let current = idx as i64 + 1;
         let (sci, com) = match bird_names(db, bird_id).await {
             Ok(s) => s,
-            Err(_) => continue,
+            Err(_) => {
+                emit(app, "backfill", format!("{}/{}", current, total), current, total);
+                continue;
+            }
         };
+        emit(app, "backfill", format!("{} ({}/{})", com, current, total), current, total);
+        throttle.api_slot().await;
         let (recs, _) = xc_recordings_for(&client, &xc_key, &sci, Some(&com), None, None).await;
         let meta: std::collections::HashMap<String, XcRecording> =
             recs.into_iter().map(|r| (r.id.clone(), r)).collect();
@@ -1088,7 +1101,6 @@ pub async fn backfill_recording_meta(db: &Db) -> Result<i64> {
                 updated += 1;
             }
         }
-        tokio::time::sleep(Duration::from_millis(1000)).await; // XC rate limit
     }
     Ok(updated)
 }
