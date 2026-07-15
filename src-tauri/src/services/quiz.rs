@@ -167,14 +167,37 @@ async fn build_question(db: &Db, id: i64, name: String, is_new: bool) -> Result<
         .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
         .unwrap_or_default();
 
-    // Distractors: 3 random other birds, excluding any background species.
+    // Resolve each background species to a common name (library → eBird taxonomy
+    // → XC-name cache). The common name is used both for display and to exclude
+    // it from the options — matching on the common name as well as the raw
+    // scientific name closes the XC(IOC)/eBird taxonomy gap (e.g. a library bird
+    // stored as eBird "Corypha africana" still gets excluded when XC's background
+    // lists it under IOC "Mirafra africana", since both are "Rufous-naped Lark").
+    let mut background = Vec::with_capacity(bg_sci.len());
+    let mut bg_common: Vec<String> = Vec::new();
+    for sci in &bg_sci {
+        let common = crate::services::import::common_for_sci(db, sci).await;
+        if let Some(c) = &common {
+            bg_common.push(c.clone());
+        }
+        background.push(crate::commands::BackgroundBird { scientific: sci.clone(), common });
+    }
+
+    // Distractors: 3 random other birds, excluding any background species by
+    // both scientific name and resolved common name.
     let mut sql = String::from("SELECT common_name FROM birds WHERE id != ?");
     for _ in &bg_sci {
         sql.push_str(" AND scientific_name != ?");
     }
+    for _ in &bg_common {
+        sql.push_str(" AND common_name != ?");
+    }
     sql.push_str(" ORDER BY RANDOM() LIMIT 3");
     let mut q = sqlx::query(&sql).bind(id);
     for name in &bg_sci {
+        q = q.bind(name);
+    }
+    for name in &bg_common {
         q = q.bind(name);
     }
     let choices = q
@@ -183,17 +206,6 @@ async fn build_question(db: &Db, id: i64, name: String, is_new: bool) -> Result<
         .into_iter()
         .map(|r| r.get::<String, _>("common_name"))
         .collect::<Vec<_>>();
-
-    // Resolve background species to common names where they're in the library.
-    let mut background = Vec::with_capacity(bg_sci.len());
-    for sci in &bg_sci {
-        let common: Option<String> =
-            sqlx::query_scalar("SELECT common_name FROM birds WHERE scientific_name = ?1")
-                .bind(sci)
-                .fetch_optional(&db.0)
-                .await?;
-        background.push(crate::commands::BackgroundBird { scientific: sci.clone(), common });
-    }
 
     let mut options = choices;
     options.push(name);

@@ -523,7 +523,7 @@
 								{/if}
 								{#if r.background.length > 0}
 									<dt class="text-xs text-be-muted-fg">Background</dt>
-									<dd class="text-be-muted-fg"><em>{r.background.join(', ')}</em></dd>
+									<dd class="text-be-muted-fg">{r.background.join(', ')}</dd>
 								{/if}
 								{#if licenseLabel(r.license_url)}
 									<dt class="text-xs text-be-muted-fg">Licence</dt>
