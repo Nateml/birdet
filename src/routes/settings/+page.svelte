@@ -332,6 +332,10 @@
 				<span>nateml</span>
 			</div>
 			<div class="flex items-center gap-2">
+				<span class="w-16 shrink-0 text-xs text-be-muted-fg">Logo</span>
+				<span>Ockert Kok</span>
+			</div>
+			<div class="flex items-center gap-2">
 				<span class="w-16 shrink-0 text-xs text-be-muted-fg">GitHub</span>
 				<a
 					href="https://github.com/Nateml/birdet"
@@ -352,6 +356,67 @@
 
 		<p class="mt-4 rounded-lg border border-be-accent/30 bg-be-accent/[0.06] px-3 py-2 text-xs leading-relaxed text-be-muted-fg">
 			This is an early <strong class="text-be-fg">alpha build</strong> — expect bugs and incomplete/missing features. Feedback and bug reports are very welcome.
+		</p>
+	</div>
+
+	<!-- Acknowledgements: Birdet is built on community recordings + open data,
+	     each of which requires attribution under its terms. -->
+	<div class="mt-6 rounded-xl border border-be-border bg-be-card p-6">
+		<p class="font-be-mono mb-3 text-xs uppercase tracking-widest text-be-muted-fg">Acknowledgements</p>
+		<p class="text-sm text-be-muted-fg">
+			Birdet is built on community recordings and open ornithological data. Huge thanks to
+			the recordists and organisations that make it possible.
+		</p>
+
+		<div class="mt-4 space-y-4 border-t border-be-border pt-4">
+			<div>
+				<div class="flex items-baseline justify-between gap-3">
+					<span class="text-sm font-semibold text-be-fg">Xeno-Canto</span>
+					<a
+						href="https://xeno-canto.org"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="text-xs text-be-primary hover:underline"
+					>
+						xeno-canto.org
+					</a>
+				</div>
+				<p class="mt-1 text-xs leading-relaxed text-be-muted-fg">
+					All bird sounds come from Xeno-Canto, a collaborative archive of wildlife
+					recordings. Each recording is the work of an individual recordist and is shared
+					under a
+					<a href="https://creativecommons.org/licenses/" target="_blank" rel="noopener noreferrer" class="text-be-primary hover:underline">Creative Commons</a>
+					licence. Birdet credits every recording's recordist and licence — on its bird's
+					page in the Library, and after each answer while training.
+				</p>
+			</div>
+
+			<div>
+				<div class="flex items-baseline justify-between gap-3">
+					<span class="text-sm font-semibold text-be-fg">eBird &amp; the Cornell Lab of Ornithology</span>
+					<a
+						href="https://ebird.org"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="text-xs text-be-primary hover:underline"
+					>
+						ebird.org
+					</a>
+				</div>
+				<p class="mt-1 text-xs leading-relaxed text-be-muted-fg">
+					Species names, taxonomy, regional checklists and relative-abundance data are from
+					<a href="https://ebird.org" target="_blank" rel="noopener noreferrer" class="text-be-primary hover:underline">eBird</a>,
+					a project of the
+					<a href="https://www.birds.cornell.edu" target="_blank" rel="noopener noreferrer" class="text-be-primary hover:underline">Cornell Lab of Ornithology</a>.
+					Taxonomy follows the eBird/Clements Checklist. Birdet is not affiliated with or
+					endorsed by eBird or the Cornell Lab.
+				</p>
+			</div>
+		</div>
+
+		<p class="mt-4 text-[11px] leading-relaxed text-be-muted-fg">
+			Birdet is an independent, non-commercial learning tool. Recording copyrights remain with
+			their respective recordists; see each recording's licence for its terms.
 		</p>
 	</div>
 </main>
