@@ -11,3 +11,5 @@ export async function setSetting(key: string, value: string): Promise<void> {
 
 export const SETTING_EBIRD_KEY = 'ebird_api_key';
 export const SETTING_XC_KEY = 'xc_api_key';
+export const SETTING_MAX_RECORDING_SECONDS = 'max_recording_seconds';
+export const DEFAULT_MAX_RECORDING_SECONDS = 90;
