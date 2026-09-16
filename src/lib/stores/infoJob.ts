@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { onImportProgress } from '$lib/api/import';
-import { backfillBirdInfo, isBackfillRunning } from '$lib/api/info';
+import { backfillBirdInfo, isBackfillRunning, cancelBackfill } from '$lib/api/info';
 
 // Global, app-lifetime state for a species-notes run, mirroring `importJob`.
 // The run is long (about a second per bird) and lives in the backend, so it
@@ -9,6 +9,7 @@ import { backfillBirdInfo, isBackfillRunning } from '$lib/api/info';
 export type InfoJob = {
     active: boolean;
     force: boolean; // a re-fetch of everything, not just the missing ones
+    stopping: boolean; // a stop was asked for; the run ends after the current bird
     current: number;
     total: number;
     message: string;
@@ -18,6 +19,7 @@ export type InfoJob = {
 const empty: InfoJob = {
     active: false,
     force: false,
+    stopping: false,
     current: 0,
     total: 0,
     message: '',
@@ -92,8 +94,14 @@ export async function runInfoJob(force = false): Promise<number> {
     infoJob.set({ ...empty, active: true, force, message: 'Starting…' });
     try {
         const n = await backfillBirdInfo(force);
-        const result =
-            n > 0
+        // A stopped run still reports what it managed — every bird is saved as
+        // it's fetched, so the work up to the stop is kept.
+        const stopped = get(infoJob).stopping;
+        const result = stopped
+            ? n > 0
+                ? `Stopped — notes for ${n} species were saved.`
+                : 'Stopped before any notes were found.'
+            : n > 0
                 ? force
                     ? `Re-fetched notes for ${n} species.`
                     : `Added notes for ${n} species.`
@@ -106,6 +114,25 @@ export async function runInfoJob(force = false): Promise<number> {
         infoJob.update((j) => ({ ...j, result: (e as string)?.toString() ?? 'Lookup failed.' }));
         throw e;
     } finally {
-        infoJob.update((j) => ({ ...j, active: false, current: 0, total: 0, message: '' }));
+        infoJob.update((j) => ({
+            ...j,
+            active: false,
+            stopping: false,
+            current: 0,
+            total: 0,
+            message: ''
+        }));
+    }
+}
+
+// Ask the backend to stop after the bird it's on. The run's own promise still
+// settles normally, so `runInfoJob`'s finally clause does the cleanup.
+export async function stopInfoJob(): Promise<void> {
+    if (!get(infoJob).active) return;
+    infoJob.update((j) => ({ ...j, stopping: true, message: 'Stopping…' }));
+    try {
+        await cancelBackfill();
+    } catch {
+        infoJob.update((j) => ({ ...j, stopping: false }));
     }
 }

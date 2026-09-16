@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { importJob } from '$lib/stores/importJob';
-	import { infoJob } from '$lib/stores/infoJob';
+	import { infoJob, stopInfoJob } from '$lib/stores/infoJob';
 
 	const pct = $derived(
 		$importJob.total ? Math.min(100, Math.round(($importJob.current / $importJob.total) * 100)) : 0
@@ -54,9 +54,18 @@
 				<div class="h-full rounded-full bg-be-primary transition-all duration-300" style="width: {infoPct}%"></div>
 			</div>
 		{/if}
-		{#if $infoJob.message}
-			<p class="mt-2 truncate text-xs text-be-muted-fg">{$infoJob.message}</p>
-		{/if}
+		<div class="mt-2 flex items-center gap-2">
+			{#if $infoJob.message}
+				<p class="min-w-0 flex-1 truncate text-xs text-be-muted-fg">{$infoJob.message}</p>
+			{/if}
+			<button
+				onclick={stopInfoJob}
+				disabled={$infoJob.stopping}
+				class="ml-auto shrink-0 rounded-md border border-be-border px-2 py-0.5 text-[11px] text-be-muted-fg transition-colors hover:bg-be-secondary hover:text-be-fg disabled:opacity-50"
+			>
+				{$infoJob.stopping ? 'Stopping…' : 'Stop'}
+			</button>
+		</div>
 	</div>
 {/if}
 </div>

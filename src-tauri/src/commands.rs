@@ -325,6 +325,14 @@ pub async fn bird_info_backfill_running() -> Result<bool, String> {
     Ok(crate::services::info::backfill_running())
 }
 
+/// Ask a running species-notes backfill to stop after the bird it's on. Safe to
+/// call when nothing is running.
+#[tauri::command]
+pub async fn cancel_bird_info_backfill() -> Result<(), String> {
+    crate::services::info::cancel_backfill();
+    Ok(())
+}
+
 /// Read a bird's downloaded photo. Served as bytes (like recordings) rather than
 /// through the asset protocol, so the images dir doesn't need an asset scope.
 #[tauri::command]

@@ -51,6 +51,11 @@ const BACKFILL_INTERVAL: Duration = Duration::from_millis(1200);
 /// iNaturalist's ~60/min.
 static BACKFILL_RUNNING: AtomicBool = AtomicBool::new(false);
 
+/// Set by `cancel_backfill` to ask the running loop to stop. Only meaningful
+/// while a run holds `BACKFILL_RUNNING`; `RunGuard::acquire` clears it so a
+/// cancel arriving just as one run ends can't kill the next one.
+static CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
+
 /// Held for the length of a run; clears the flag however the run ends, panics
 /// and early returns included.
 struct RunGuard;
@@ -61,12 +66,16 @@ impl RunGuard {
         BACKFILL_RUNNING
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
-            .then_some(RunGuard)
+            .then(|| {
+                CANCEL_REQUESTED.store(false, Ordering::Release);
+                RunGuard
+            })
     }
 }
 
 impl Drop for RunGuard {
     fn drop(&mut self) {
+        CANCEL_REQUESTED.store(false, Ordering::Release);
         BACKFILL_RUNNING.store(false, Ordering::Release);
     }
 }
@@ -75,6 +84,19 @@ impl Drop for RunGuard {
 /// after a reload rather than showing an idle button over a running job.
 pub fn backfill_running() -> bool {
     BACKFILL_RUNNING.load(Ordering::Acquire)
+}
+
+/// Ask the running backfill to stop after the species it's on. No-op when
+/// nothing is running. Every bird is stored as it's fetched, so stopping loses
+/// nothing already done.
+pub fn cancel_backfill() {
+    if BACKFILL_RUNNING.load(Ordering::Acquire) {
+        CANCEL_REQUESTED.store(true, Ordering::Release);
+    }
+}
+
+fn cancelled() -> bool {
+    CANCEL_REQUESTED.load(Ordering::Acquire)
 }
 
 fn client() -> Result<reqwest::Client> {
@@ -225,8 +247,14 @@ pub async fn backfill_bird_info(app: &AppHandle, db: &Db, force: bool) -> Result
 
     let client = client()?;
     let mut filled = 0i64;
+    let mut stopped_at = None;
     for (i, bird_id) in ids.into_iter().enumerate() {
         let current = i as i64 + 1;
+        // Checked before the pacing sleep so a cancel doesn't wait it out.
+        if cancelled() {
+            stopped_at = Some(i as i64);
+            break;
+        }
         if i > 0 {
             tokio::time::sleep(BACKFILL_INTERVAL).await;
         }
@@ -254,7 +282,10 @@ pub async fn backfill_bird_info(app: &AppHandle, db: &Db, force: bool) -> Result
         }
     }
 
-    emit(app, format!("Added notes for {} of {} species.", filled, total), total, total);
+    match stopped_at {
+        Some(done) => emit(app, format!("Stopped after {} of {} species.", done, total), done, total),
+        None => emit(app, format!("Added notes for {} of {} species.", filled, total), total, total),
+    }
     Ok(filled)
 }
 
@@ -268,6 +299,9 @@ pub async fn fetch_many_quiet(app: &AppHandle, db: &Db, bird_ids: &[i64]) {
     let Some(_guard) = RunGuard::acquire() else { return };
     let Ok(client) = client() else { return };
     for (i, &bird_id) in bird_ids.iter().enumerate() {
+        if cancelled() {
+            return;
+        }
         if i > 0 {
             tokio::time::sleep(BACKFILL_INTERVAL).await;
         }
@@ -1262,13 +1296,26 @@ Rock kestrels feed on a wide variety of organisms, mostly invertebrates.
         assert!(f.behaviour.expect("behaviour").contains("invertebrates"));
     }
 
-    /// The guard is what stops a second Settings visit starting a parallel run.
+    /// The guard stops a second Settings visit starting a parallel run, and a
+    /// cancel must not leak into whatever runs next. One test, not two: the
+    /// flags are process-wide statics and cargo runs tests in parallel, so two
+    /// tests competing for the guard would flake.
     #[test]
-    fn only_one_notes_run_at_a_time() {
+    fn one_run_at_a_time_and_cancels_dont_outlive_it() {
         let first = RunGuard::acquire().expect("first run starts");
         assert!(RunGuard::acquire().is_none(), "a second run must be refused");
+
+        cancel_backfill();
+        assert!(cancelled(), "the running loop sees the request");
         drop(first);
-        assert!(RunGuard::acquire().is_some(), "the flag clears when a run ends");
+
+        let second = RunGuard::acquire().expect("the flag clears when a run ends");
+        assert!(!cancelled(), "the new run starts uncancelled");
+        drop(second);
+
+        // Nothing running: a stray cancel must not arm the next run.
+        cancel_backfill();
+        assert!(!cancelled(), "a cancel with no run in flight is a no-op");
     }
 
     #[test]

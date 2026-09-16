@@ -45,6 +45,11 @@ export async function isBackfillRunning(): Promise<boolean> {
     return await invoke<boolean>('bird_info_backfill_running');
 }
 
+/// Ask a running backfill to stop after the bird it's on. Safe when idle.
+export async function cancelBackfill(): Promise<void> {
+    await invoke('cancel_bird_info_backfill');
+}
+
 export async function setBirdNotes(birdId: number, notes: string | null): Promise<void> {
     await invoke('set_bird_notes', { birdId, notes });
 }

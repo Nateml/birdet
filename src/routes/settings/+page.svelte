@@ -10,7 +10,7 @@
 		DEFAULT_MAX_RECORDING_SECONDS
 	} from '$lib/api/settings';
 	import { backfillRecordingMeta, repairRecordings } from '$lib/api/recordings';
-	import { infoJob, runInfoJob, adoptRunningInfoJob } from '$lib/stores/infoJob';
+	import { infoJob, runInfoJob, adoptRunningInfoJob, stopInfoJob } from '$lib/stores/infoJob';
 	import { onImportProgress } from '$lib/api/import';
 	import { updateState, checkForUpdate, installUpdate } from '$lib/stores/updater';
 	import logo from '$lib/assets/logo.svg';
@@ -316,13 +316,23 @@
 					doesn't have one. Text comes from Wikipedia (CC BY-SA 4.0) and is cached for offline use.
 				</span>
 			</span>
-			<button
-				onclick={() => runInfoBackfill()}
-				disabled={$infoJob.active}
-				class="shrink-0 rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
-			>
-				{$infoJob.active ? 'Fetching…' : 'Fetch'}
-			</button>
+			{#if $infoJob.active && !$infoJob.force}
+				<button
+					onclick={stopInfoJob}
+					disabled={$infoJob.stopping}
+					class="shrink-0 rounded-lg border border-be-destructive/50 px-3.5 py-2 text-sm text-be-destructive transition-colors hover:bg-be-destructive/10 disabled:opacity-50"
+				>
+					{$infoJob.stopping ? 'Stopping…' : 'Stop'}
+				</button>
+			{:else}
+				<button
+					onclick={() => runInfoBackfill()}
+					disabled={$infoJob.active}
+					class="shrink-0 rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
+				>
+					{$infoJob.active ? 'Fetching…' : 'Fetch'}
+				</button>
+			{/if}
 		</div>
 		{#if $infoJob.active}
 			{@const p = $infoJob}
@@ -425,15 +435,25 @@
 							leaves your own notes alone.
 						</span>
 					</span>
-					<button
-						onclick={() => (forceArmed ? runInfoBackfill(true) : (forceArmed = true))}
-						disabled={$infoJob.active}
-						class="shrink-0 rounded-lg border px-3.5 py-2 text-sm transition-colors disabled:opacity-50 {forceArmed
-							? 'border-be-primary text-be-primary hover:bg-be-primary/10'
-							: 'border-be-border hover:bg-be-secondary'}"
-					>
-						{$infoJob.active ? 'Fetching…' : forceArmed ? 'Confirm re-fetch' : 'Re-fetch'}
-					</button>
+					{#if $infoJob.active && $infoJob.force}
+						<button
+							onclick={stopInfoJob}
+							disabled={$infoJob.stopping}
+							class="shrink-0 rounded-lg border border-be-destructive/50 px-3.5 py-2 text-sm text-be-destructive transition-colors hover:bg-be-destructive/10 disabled:opacity-50"
+						>
+							{$infoJob.stopping ? 'Stopping…' : 'Stop'}
+						</button>
+					{:else}
+						<button
+							onclick={() => (forceArmed ? runInfoBackfill(true) : (forceArmed = true))}
+							disabled={$infoJob.active}
+							class="shrink-0 rounded-lg border px-3.5 py-2 text-sm transition-colors disabled:opacity-50 {forceArmed
+								? 'border-be-primary text-be-primary hover:bg-be-primary/10'
+								: 'border-be-border hover:bg-be-secondary'}"
+						>
+							{$infoJob.active ? 'Fetching…' : forceArmed ? 'Confirm re-fetch' : 'Re-fetch'}
+						</button>
+					{/if}
 				</div>
 				{#if $infoJob.active}
 					{@const p = $infoJob}

@@ -67,6 +67,7 @@ fn main() -> anyhow::Result<()> {
             commands::fetch_bird_info,
             commands::backfill_bird_info,
             commands::bird_info_backfill_running,
+            commands::cancel_bird_info_backfill,
             commands::set_bird_notes,
             commands::get_bird_image_bytes,
             commands::repair_recordings,
