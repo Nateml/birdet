@@ -10,7 +10,7 @@
 		DEFAULT_MAX_RECORDING_SECONDS
 	} from '$lib/api/settings';
 	import { backfillRecordingMeta, repairRecordings } from '$lib/api/recordings';
-	import { backfillBirdInfo } from '$lib/api/info';
+	import { infoJob, runInfoJob, adoptRunningInfoJob } from '$lib/stores/infoJob';
 	import { onImportProgress } from '$lib/api/import';
 	import { updateState, checkForUpdate, installUpdate } from '$lib/stores/updater';
 	import logo from '$lib/assets/logo.svg';
@@ -39,6 +39,9 @@
 		xcKey = xc;
 		const n = parseInt(ml, 10);
 		maxLen = Number.isFinite(n) && ml.trim() !== '' ? n : DEFAULT_MAX_RECORDING_SECONDS;
+		// A run started before this screen was opened is still going in the
+		// backend — show it rather than an idle button.
+		void adoptRunningInfoJob();
 	});
 
 	async function saveMaxLen() {
@@ -64,40 +67,18 @@
 	}
 
 	// Fetch species notes (description / habitat / behaviour / voice) for every
-	// bird that doesn't have them yet.
-	let infoBusy = $state(false);
-	let infoMsg = $state<string | null>(null);
-	let infoProgress = $state<{ current: number; total: number; message: string } | null>(null);
+	// bird that doesn't have them yet. State lives in the `infoJob` store, not
+	// here: the run outlives this screen, and a component-local flag would let a
+	// second run start the moment you navigated away and back.
 	// `force` re-fetches every bird, including ones already looked up — the way to
 	// pull existing notes through a change to the Wikipedia parser. Slow (a bird a
 	// second) and network-bound, so it lives behind Dev tools.
 	async function runInfoBackfill(force = false) {
-		if (infoBusy) return;
 		forceArmed = false;
-		infoBusy = true;
-		infoMsg = null;
-		infoProgress = null;
-		const unlisten = await onImportProgress((p) => {
-			if (p.stage === 'info') {
-				infoProgress = { current: p.current, total: p.total, message: p.message };
-			}
-		});
 		try {
-			const n = await backfillBirdInfo(force);
-			infoMsg =
-				n > 0
-					? force
-						? `Re-fetched notes for ${n} species.`
-						: `Added notes for ${n} species.`
-					: force
-						? 'No notes found for any species.'
-						: 'No new notes found — every bird has already been looked up.';
-		} catch (e) {
-			infoMsg = (e as string) ?? 'Lookup failed.';
-		} finally {
-			unlisten();
-			infoBusy = false;
-			infoProgress = null;
+			await runInfoJob(force);
+		} catch {
+			// The store keeps the message; nothing more to do here.
 		}
 	}
 
@@ -337,14 +318,14 @@
 			</span>
 			<button
 				onclick={() => runInfoBackfill()}
-				disabled={infoBusy}
+				disabled={$infoJob.active}
 				class="shrink-0 rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
 			>
-				{infoBusy ? 'Fetching…' : 'Fetch'}
+				{$infoJob.active ? 'Fetching…' : 'Fetch'}
 			</button>
 		</div>
-		{#if infoBusy && infoProgress}
-			{@const p = infoProgress}
+		{#if $infoJob.active}
+			{@const p = $infoJob}
 			<div class="mt-3">
 				<div class="mb-1 flex justify-between font-be-mono text-[11px] text-be-muted-fg">
 					<span class="truncate">{p.message}</span>
@@ -357,8 +338,8 @@
 					></div>
 				</div>
 			</div>
-		{:else if infoMsg}
-			<p class="mt-3 text-xs text-be-muted-fg">{infoMsg}</p>
+		{:else if $infoJob.result}
+			<p class="mt-3 text-xs text-be-muted-fg">{$infoJob.result}</p>
 		{/if}
 	</div>
 
@@ -446,16 +427,16 @@
 					</span>
 					<button
 						onclick={() => (forceArmed ? runInfoBackfill(true) : (forceArmed = true))}
-						disabled={infoBusy}
+						disabled={$infoJob.active}
 						class="shrink-0 rounded-lg border px-3.5 py-2 text-sm transition-colors disabled:opacity-50 {forceArmed
 							? 'border-be-primary text-be-primary hover:bg-be-primary/10'
 							: 'border-be-border hover:bg-be-secondary'}"
 					>
-						{infoBusy ? 'Fetching…' : forceArmed ? 'Confirm re-fetch' : 'Re-fetch'}
+						{$infoJob.active ? 'Fetching…' : forceArmed ? 'Confirm re-fetch' : 'Re-fetch'}
 					</button>
 				</div>
-				{#if infoBusy && infoProgress}
-					{@const p = infoProgress}
+				{#if $infoJob.active}
+					{@const p = $infoJob}
 					<div class="mt-1">
 						<div class="mb-1 flex justify-between font-be-mono text-[11px] text-be-muted-fg">
 							<span class="truncate">{p.message}</span>

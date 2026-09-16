@@ -39,6 +39,12 @@ export async function backfillBirdInfo(force = false): Promise<number> {
     return await invoke<number>('backfill_bird_info', { force });
 }
 
+/// Is a backfill already in flight in the backend? Survives a window reload, so
+/// the UI can pick an in-progress run back up.
+export async function isBackfillRunning(): Promise<boolean> {
+    return await invoke<boolean>('bird_info_backfill_running');
+}
+
 export async function setBirdNotes(birdId: number, notes: string | null): Promise<void> {
     await invoke('set_bird_notes', { birdId, notes });
 }

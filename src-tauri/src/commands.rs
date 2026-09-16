@@ -317,6 +317,14 @@ pub async fn backfill_bird_info(
         .map_err(|e| e.to_string())
 }
 
+/// Is a species-notes run in flight? The frontend asks on mount so a reload (or
+/// a fresh window) picks the progress bar back up instead of offering a button
+/// that would be refused.
+#[tauri::command]
+pub async fn bird_info_backfill_running() -> Result<bool, String> {
+    Ok(crate::services::info::backfill_running())
+}
+
 /// Read a bird's downloaded photo. Served as bytes (like recordings) rather than
 /// through the asset protocol, so the images dir doesn't need an asset scope.
 #[tauri::command]

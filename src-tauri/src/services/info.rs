@@ -19,6 +19,7 @@ use crate::services::regions::enc;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -42,6 +43,39 @@ const MAX_FIELD: usize = 1400;
 /// requests/minute and we make two calls per bird, so pace at roughly one bird
 /// per 1.2s rather than racing.
 const BACKFILL_INTERVAL: Duration = Duration::from_millis(1200);
+
+/// One notes run at a time, process-wide. Both entry points are long, paced and
+/// network-bound, and the UI can't enforce this on its own: navigating away from
+/// Settings destroys the component that was tracking the run, so without this a
+/// second click would start a parallel loop and double the request rate against
+/// iNaturalist's ~60/min.
+static BACKFILL_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Held for the length of a run; clears the flag however the run ends, panics
+/// and early returns included.
+struct RunGuard;
+
+impl RunGuard {
+    /// `None` when a run is already in flight.
+    fn acquire() -> Option<RunGuard> {
+        BACKFILL_RUNNING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+            .then_some(RunGuard)
+    }
+}
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        BACKFILL_RUNNING.store(false, Ordering::Release);
+    }
+}
+
+/// Is a species-notes run in flight? Lets the frontend recover its progress bar
+/// after a reload rather than showing an idle button over a running job.
+pub fn backfill_running() -> bool {
+    BACKFILL_RUNNING.load(Ordering::Acquire)
+}
 
 fn client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
@@ -170,6 +204,9 @@ pub async fn fetch_bird_info(app: &AppHandle, db: &Db, bird_id: i64, force: bool
 /// Runs sequentially and paced; per-bird failures are tolerated and simply leave
 /// that species blank. Returns how many birds gained text.
 pub async fn backfill_bird_info(app: &AppHandle, db: &Db, force: bool) -> Result<i64> {
+    let Some(_guard) = RunGuard::acquire() else {
+        return Err(anyhow!("A species-notes lookup is already running — let it finish first."));
+    };
     let sql = if force {
         "SELECT b.ID FROM birds b ORDER BY b.common_name"
     } else {
@@ -226,6 +263,9 @@ pub async fn backfill_bird_info(app: &AppHandle, db: &Db, force: bool) -> Result
 /// doesn't hold up the import summary. Per-bird failures are swallowed: the
 /// species simply has no notes until the next backfill.
 pub async fn fetch_many_quiet(app: &AppHandle, db: &Db, bird_ids: &[i64]) {
+    // A backfill already covers every bird without notes, these included, so
+    // stepping aside costs nothing but a delay.
+    let Some(_guard) = RunGuard::acquire() else { return };
     let Ok(client) = client() else { return };
     for (i, &bird_id) in bird_ids.iter().enumerate() {
         if i > 0 {
@@ -1220,6 +1260,15 @@ Rock kestrels feed on a wide variety of organisms, mostly invertebrates.
         let f = sections_by_field(extract);
         assert!(f.voice.is_none(), "got: {:?}", f.voice);
         assert!(f.behaviour.expect("behaviour").contains("invertebrates"));
+    }
+
+    /// The guard is what stops a second Settings visit starting a parallel run.
+    #[test]
+    fn only_one_notes_run_at_a_time() {
+        let first = RunGuard::acquire().expect("first run starts");
+        assert!(RunGuard::acquire().is_none(), "a second run must be refused");
+        drop(first);
+        assert!(RunGuard::acquire().is_some(), "the flag clears when a run ends");
     }
 
     #[test]
