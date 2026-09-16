@@ -104,6 +104,8 @@ pub struct ImportParams {
     pub pack_include_skipped: bool, // fold already-owned (skipped) birds into the created pack
     #[serde(default)]
     pub pack_icon: Option<String>,  // emoji icon for the created pack
+    #[serde(default = "default_true")]
+    pub fetch_info: bool,           // also look up species notes for the new birds
 }
 
 fn default_true() -> bool {
@@ -377,6 +379,9 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
         )
         .await?;
     let total = taxa.len() as i64;
+    if params.fetch_info {
+        spawn_info_fill(app, db, &imported_bird_ids);
+    }
 
     // Combine freshly-imported birds with any skipped (already-owned) ones the
     // user asked to fold in, so the pack covers the whole region/family.
@@ -422,6 +427,25 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
     Ok(summary)
 }
 
+/// Kick off species-notes lookups for freshly imported birds without blocking.
+/// Skipped when the import asked for no notes (`fetch_info`): the lookups are
+/// detached, but they still compete for bandwidth with the audio downloads.
+/// Wikipedia/iNaturalist are paced at roughly a bird a second, so waiting on
+/// them would add minutes to a large import for text nobody is looking at yet.
+/// Detached and silent: the notes are simply there next time the bird is opened,
+/// and Settings → "Fetch species notes" is the visible, resumable path.
+fn spawn_info_fill(app: &AppHandle, db: &Db, bird_ids: &[i64]) {
+    if bird_ids.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    let db = db.clone();
+    let ids = bird_ids.to_vec();
+    tauri::async_runtime::spawn(async move {
+        crate::services::info::fetch_many_quiet(&app, &db, &ids).await;
+    });
+}
+
 /// Import specific species by eBird code — the manual search-and-add path.
 /// Reuses the per-species XC fetch/download/upsert. Imported birds are added to
 /// each pack in `pack_ids` and, if `new_pack_name` is set, to a fresh pack.
@@ -434,6 +458,7 @@ pub async fn import_species(
     max_per_species: i64,
     pack_ids: Vec<String>,
     new_pack_name: Option<String>,
+    fetch_info: bool,
 ) -> Result<ImportSummary> {
     let xc_key = settings::get_setting(db, "xc_api_key")
         .await?
@@ -459,6 +484,9 @@ pub async fn import_species(
             quality.as_deref(), rec_type.as_deref(), max_per_species.max(1),
         )
         .await?;
+    if fetch_info {
+        spawn_info_fill(app, db, &imported_bird_ids);
+    }
 
     // Attach imported birds to the chosen packs.
     let mut added_to_pack = 0;
@@ -570,6 +598,8 @@ pub async fn import_pack(
     }
     bird_ids.sort_unstable();
     bird_ids.dedup();
+
+    spawn_info_fill(app, db, &bird_ids);
 
     let pack_id = crate::services::packs::create_pack_from_birds(db, &name, &bird_ids).await?;
     emit(app, "done", format!("Imported pack “{}”.", name), 1, 1);

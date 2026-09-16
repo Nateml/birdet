@@ -10,6 +10,7 @@
 	import SpectroWorker from '$lib/spectrogram.worker?worker';
 	import type { QuestionDto } from '$lib/api/quiz';
 	import { licenseLabel, licenseHref, xcUrl } from '$lib/license';
+	import { getBirdInfo, type BirdInfo } from '$lib/api/info';
 	import { scale } from 'svelte/transition';
 
 	const id = page.params.sessionID;
@@ -32,6 +33,12 @@
 	} | null>(null);
 	let isPlaying = $state(false);
 	let hasPlayed = $state(false);
+
+	// A line about the bird, shown only once the answer is out. This is where the
+	// repetition actually happens, so it's the highest-value place to put the
+	// "what to listen for" text — but showing it before the guess would give the
+	// answer away.
+	let revealInfo = $state<BirdInfo | null>(null);
 
 	// Snapshot of this question's position (session.index advances on answer).
 	let qNum = $state(1);
@@ -303,6 +310,7 @@
 		cancelAnimationFrame(raf);
 		if (audioUrl) URL.revokeObjectURL(audioUrl);
 		question = null;
+		revealInfo = null;
 		audioUrl = null;
 		spec = null;
 		bitmap = null;
@@ -384,6 +392,41 @@
 		if (audioUrl) URL.revokeObjectURL(audioUrl);
 	});
 
+	// Pull the cached blurb once the answer is revealed. Silent on failure: the
+	// snippet is a bonus, never something that can break the answer screen.
+	// One line for the reveal screen. The user's own note beats Wikipedia's prose
+	// — they wrote it to jog exactly this memory — then the voice description,
+	// then the lead paragraph as a last resort.
+	const revealSnippet = $derived.by(() => {
+		const i = revealInfo;
+		if (!i) return null;
+		const pick = i.user_notes
+			? { label: 'Your note', text: i.user_notes }
+			: i.voice
+				? { label: 'Listen for', text: i.voice }
+				: i.summary
+					? { label: 'About', text: i.summary }
+					: null;
+		if (!pick) return null;
+		const t = pick.text.trim();
+		return {
+			label: pick.label,
+			text: t.length > 260 ? t.slice(0, 260).replace(/\s+\S*$/, '') + '…' : t
+		};
+	});
+
+	async function loadRevealInfo() {
+		const id = question?.bird_id;
+		if (!id) return;
+		try {
+			const got = await getBirdInfo(id);
+			// Guard against a slow read landing after the user moved on.
+			if (question?.bird_id === id) revealInfo = got;
+		} catch {
+			/* no notes for this bird */
+		}
+	}
+
 	async function choose(choice: string) {
 		if (feedback) return;
 		selected = choice;
@@ -396,6 +439,7 @@
 					guess: choice,
 					skipped: false
 				};
+			void loadRevealInfo();
 		} catch (e) {
 			selected = null;
 			error = (e as Error)?.message ?? 'Failed to submit answer.';
@@ -415,6 +459,7 @@
 					guess: '',
 					skipped: true
 				};
+			void loadRevealInfo();
 		} catch (e) {
 			error = (e as Error)?.message ?? 'Failed to submit answer.';
 		}
@@ -786,6 +831,17 @@
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
 				</button>
 			</div>
+			<!-- What to listen for. Only after the reveal — before it, this would
+			     hand over the answer. -->
+			{#if revealSnippet}
+				<div class="mt-4 rounded-lg border border-be-primary/25 bg-be-primary/5 px-4 py-3">
+					<p class="font-be-mono mb-1 text-[10px] uppercase tracking-widest text-be-primary">
+						{revealSnippet.label}
+					</p>
+					<p class="text-sm leading-relaxed text-be-fg">{revealSnippet.text}</p>
+				</div>
+			{/if}
+
 			<!-- Recording credit (Creative Commons attribution). Revealed with the
 			     answer so it doesn't hint the bird before you guess. -->
 			{#if question.recordist || question.xc_id}

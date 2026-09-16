@@ -14,7 +14,15 @@
 		type RecordingCandidate
 	} from '$lib/api/recordings';
 	import { runImportJob, importJob } from '$lib/stores/importJob';
-	import { licenseLabel, licenseHref } from '$lib/license';
+	import { licenseLabel, licenseHref, ccDeedUrl } from '$lib/license';
+	import {
+		getBirdInfo,
+		fetchBirdInfo,
+		setBirdNotes,
+		hasInfoText,
+		getBirdImageBlobUrl,
+		type BirdInfo
+	} from '$lib/api/info';
 
 	let {
 		birdId,
@@ -57,6 +65,14 @@
 	let searched = $state(false);
 	let toAdd = $state<Set<string>>(new Set());
 	let confirmingDeleteBird = $state(false);
+
+	// About — the cached species blurb plus the user's own notes.
+	let info = $state<BirdInfo | null>(null);
+	let infoBusy = $state(false);
+	let infoMsg = $state<string | null>(null);
+	let notesDraft = $state('');
+	let notesSaved = $state(false);
+	let imgUrl = $state<string | null>(null);
 
 	// add by catalogue number
 	let catNr = $state('');
@@ -164,10 +180,68 @@
 			if (!bird) throw new Error('Bird not found.');
 			recordings = await getBirdRecordings(birdId);
 			void refreshDurations();
+			void loadInfo();
 		} catch (e) {
 			error = (e as Error)?.message ?? (e as string) ?? 'Failed to load bird.';
 		} finally {
 			loading = false;
+		}
+	}
+
+	// Read the cached blurb. Failures are silent: the About card just stays on
+	// its empty state, and the rest of the pane is unaffected.
+	async function loadInfo() {
+		infoMsg = null;
+		try {
+			info = await getBirdInfo(birdId);
+		} catch {
+			info = null;
+		}
+		notesDraft = info?.user_notes ?? '';
+		notesSaved = false;
+		void loadImage();
+	}
+
+	// The photo lives on disk; read it as a blob so it works offline and needs
+	// no asset scope. Revoke the previous one so switching birds doesn't leak.
+	async function loadImage() {
+		const prev = imgUrl;
+		imgUrl = null;
+		if (prev) URL.revokeObjectURL(prev);
+		if (!info?.image_path) return;
+		try {
+			imgUrl = await getBirdImageBlobUrl(birdId);
+		} catch {
+			/* no photo on disk — the card just renders without one */
+		}
+	}
+
+	// Always forced: the button is an explicit "go and look again".
+	async function refetchInfo() {
+		if (infoBusy) return;
+		infoBusy = true;
+		infoMsg = null;
+		try {
+			const found = await fetchBirdInfo(birdId, true);
+			await loadInfo();
+			if (!found) infoMsg = 'Nothing found for this species.';
+		} catch (e) {
+			infoMsg = (e as string) ?? 'Lookup failed.';
+		} finally {
+			infoBusy = false;
+		}
+	}
+
+	async function saveNotes() {
+		const next = notesDraft.trim();
+		if (next === (info?.user_notes ?? '')) return;
+		try {
+			await setBirdNotes(birdId, next || null);
+			await loadInfo();
+			notesSaved = true;
+			setTimeout(() => (notesSaved = false), 2000);
+		} catch (e) {
+			infoMsg = (e as string) ?? 'Could not save notes.';
 		}
 	}
 
@@ -331,6 +405,130 @@
 		{#if error}
 			<div class="mb-4 rounded-lg border border-be-destructive/40 bg-be-destructive/10 px-4 py-3 text-sm text-be-destructive">{error}</div>
 		{/if}
+
+		<!-- About: cached Wikipedia blurb + the user's own field notes. -->
+		<div class="mb-6 flex items-center justify-between">
+			<span class="text-sm font-medium">About</span>
+			<button
+				onclick={refetchInfo}
+				disabled={infoBusy}
+				class="rounded-lg border border-be-border px-3 py-1.5 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
+			>
+				{infoBusy ? 'Looking up…' : hasInfoText(info) ? 'Refresh' : 'Fetch notes'}
+			</button>
+		</div>
+
+		<div class="mb-6 rounded-xl border border-be-border bg-be-card p-5">
+			{#if infoMsg}
+				<p class="mb-3 text-xs text-be-muted-fg">{infoMsg}</p>
+			{/if}
+
+			<!-- Outside the text block on purpose: a species can have a photo and no
+			     article prose, and the picture is worth showing on its own. -->
+			{#if imgUrl}
+				<figure class="mb-4">
+					<!-- Contain, don't crop: a zoom-cropped photo usually cuts off
+					     the bird. A blurred copy of the same image fills the
+					     letterbox gaps so the card keeps a steady height. -->
+					<div
+						class="relative flex h-64 items-center justify-center overflow-hidden rounded-lg bg-be-secondary"
+					>
+						<img
+							src={imgUrl}
+							alt=""
+							aria-hidden="true"
+							class="absolute inset-0 h-full w-full scale-110 object-cover blur-xl saturate-150"
+						/>
+						<img
+							src={imgUrl}
+							alt={bird.common_name}
+							class="relative max-h-full max-w-full object-contain"
+						/>
+					</div>
+					<!-- A CC image needs the creator, the licence *and* a link to it,
+					     plus a way back to the original where the source gave one. -->
+					{#if info?.image_credit || info?.image_license}
+						{@const deed = info.image_license_url ?? ccDeedUrl(info.image_license)}
+						<figcaption class="mt-1.5 text-[11px] leading-relaxed text-be-muted-fg">
+							{#if info.image_credit}{info.image_credit}{/if}{#if info.image_license}{#if info.image_credit} · {/if}{#if deed}<a
+										href={deed}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="hover:text-be-fg hover:underline">{info.image_license}</a
+									>{:else}{info.image_license}{/if}{/if}{#if info.image_source_url} · <a
+									href={info.image_source_url}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="hover:text-be-fg hover:underline">source</a
+								>{/if}
+						</figcaption>
+					{/if}
+				</figure>
+			{/if}
+
+			{#if hasInfoText(info) && info}
+				{#if info.summary}
+					<p class="text-sm leading-relaxed text-be-fg">{info.summary}</p>
+				{/if}
+
+				<!-- Voice gets top billing: it's the field that actually helps you
+				     recognise the bird by ear. -->
+				{#if info.voice}
+					<div class="mt-4 rounded-lg border border-be-primary/30 bg-be-primary/5 px-4 py-3">
+						<p class="font-be-mono mb-1.5 flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-be-primary">
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>
+							Voice
+						</p>
+						<p class="whitespace-pre-line text-sm leading-relaxed text-be-fg">{info.voice}</p>
+					</div>
+				{/if}
+
+				{#each [['Appearance', info.appearance], ['Habitat', info.habitat], ['Behaviour', info.behaviour]] as [label, body] (label)}
+					{#if body}
+						<details class="mt-2 border-t border-be-border pt-2">
+							<summary class="cursor-pointer text-sm font-medium text-be-muted-fg transition-colors hover:text-be-fg">{label}</summary>
+							<p class="mt-2 whitespace-pre-line text-sm leading-relaxed text-be-fg">{body}</p>
+						</details>
+					{/if}
+				{/each}
+
+				<!-- CC BY-SA wants the credit, a link to the licence, and a note that
+				     the text was changed — this text is cut into fields and truncated. -->
+				<p class="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-be-border pt-3 text-xs text-be-muted-fg">
+					{#if info.conservation}<span>IUCN: {info.conservation}</span><span>·</span>{/if}
+					{#if info.source_url}
+						{@const deed = ccDeedUrl(info.license)}
+						<span>
+							Adapted from <a href={info.source_url} target="_blank" rel="noreferrer" class="text-be-primary hover:underline">Wikipedia</a>{#if info.license}, {#if deed}<a
+									href={deed}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="text-be-primary hover:underline">{info.license}</a
+								>{:else}{info.license}{/if}{/if}
+						</span>
+					{/if}
+				</p>
+			{:else}
+				<p class="text-sm text-be-muted-fg">
+					No notes yet. Fetch a description, habitat, behaviour and voice summary from Wikipedia.
+				</p>
+			{/if}
+
+			<!-- The user's own notes: never touched by a refetch. -->
+			<div class="mt-4 border-t border-be-border pt-3">
+				<p class="mb-1.5 flex items-center gap-2 text-xs font-medium text-be-muted-fg">
+					My notes
+					{#if notesSaved}<span class="text-be-primary">saved ✓</span>{/if}
+				</p>
+				<textarea
+					bind:value={notesDraft}
+					onblur={saveNotes}
+					rows="2"
+					placeholder="What this one sounds like to you, where you've heard it…"
+					class="w-full resize-y rounded-lg border border-be-border bg-be-bg px-3 py-2 text-sm text-be-fg outline-none placeholder:text-be-muted-fg/60 focus:border-be-primary/40"
+				></textarea>
+			</div>
+		</div>
 
 		<div class="mb-3 flex items-center justify-between">
 			<span class="text-sm font-medium">Recordings <span class="text-be-muted-fg">({recordings.length})</span></span>

@@ -10,6 +10,7 @@
 		DEFAULT_MAX_RECORDING_SECONDS
 	} from '$lib/api/settings';
 	import { backfillRecordingMeta, repairRecordings } from '$lib/api/recordings';
+	import { backfillBirdInfo } from '$lib/api/info';
 	import { onImportProgress } from '$lib/api/import';
 	import { updateState, checkForUpdate, installUpdate } from '$lib/stores/updater';
 	import logo from '$lib/assets/logo.svg';
@@ -62,8 +63,50 @@
 		await checkForUpdate({ silent: false });
 	}
 
+	// Fetch species notes (description / habitat / behaviour / voice) for every
+	// bird that doesn't have them yet.
+	let infoBusy = $state(false);
+	let infoMsg = $state<string | null>(null);
+	let infoProgress = $state<{ current: number; total: number; message: string } | null>(null);
+	// `force` re-fetches every bird, including ones already looked up — the way to
+	// pull existing notes through a change to the Wikipedia parser. Slow (a bird a
+	// second) and network-bound, so it lives behind Dev tools.
+	async function runInfoBackfill(force = false) {
+		if (infoBusy) return;
+		forceArmed = false;
+		infoBusy = true;
+		infoMsg = null;
+		infoProgress = null;
+		const unlisten = await onImportProgress((p) => {
+			if (p.stage === 'info') {
+				infoProgress = { current: p.current, total: p.total, message: p.message };
+			}
+		});
+		try {
+			const n = await backfillBirdInfo(force);
+			infoMsg =
+				n > 0
+					? force
+						? `Re-fetched notes for ${n} species.`
+						: `Added notes for ${n} species.`
+					: force
+						? 'No notes found for any species.'
+						: 'No new notes found — every bird has already been looked up.';
+		} catch (e) {
+			infoMsg = (e as string) ?? 'Lookup failed.';
+		} finally {
+			unlisten();
+			infoBusy = false;
+			infoProgress = null;
+		}
+	}
+
 	// Dev tools (collapsed by default).
 	let devOpen = $state(false);
+
+	// Re-fetching every species is slow and hits the network for each bird, so the
+	// button arms on the first click and only runs on the second.
+	let forceArmed = $state(false);
 
 	// Back-fill quality/type on recordings imported before those fields existed.
 	let backfilling = $state(false);
@@ -281,6 +324,44 @@
 		</label>
 	</div>
 
+	<!-- Library -->
+	<div class="mb-6 rounded-xl border border-be-border bg-be-card p-6">
+		<p class="font-be-mono mb-4 text-xs uppercase tracking-widest text-be-muted-fg">Library</p>
+		<div class="flex items-center justify-between gap-4">
+			<span>
+				<span class="block text-sm font-medium">Fetch species notes</span>
+				<span class="block text-xs text-be-muted-fg">
+					Look up a description, habitat, behaviour and voice summary for every bird that
+					doesn't have one. Text comes from Wikipedia (CC BY-SA 4.0) and is cached for offline use.
+				</span>
+			</span>
+			<button
+				onclick={() => runInfoBackfill()}
+				disabled={infoBusy}
+				class="shrink-0 rounded-lg border border-be-border px-3.5 py-2 text-sm transition-colors hover:bg-be-secondary disabled:opacity-50"
+			>
+				{infoBusy ? 'Fetching…' : 'Fetch'}
+			</button>
+		</div>
+		{#if infoBusy && infoProgress}
+			{@const p = infoProgress}
+			<div class="mt-3">
+				<div class="mb-1 flex justify-between font-be-mono text-[11px] text-be-muted-fg">
+					<span class="truncate">{p.message}</span>
+					{#if p.total > 0}<span class="shrink-0 tabular-nums">{p.current}/{p.total}</span>{/if}
+				</div>
+				<div class="h-1.5 w-full overflow-hidden rounded-full bg-be-muted">
+					<div
+						class="h-full rounded-full bg-be-primary transition-all duration-300"
+						style="width: {p.total > 0 ? (p.current / p.total) * 100 : 0}%"
+					></div>
+				</div>
+			</div>
+		{:else if infoMsg}
+			<p class="mt-3 text-xs text-be-muted-fg">{infoMsg}</p>
+		{/if}
+	</div>
+
 	<!-- Dev tools (collapsed) -->
 	<div class="mb-6 rounded-xl border border-be-border bg-be-card p-6">
 		<button
@@ -351,6 +432,42 @@
 					</div>
 				{:else if backfillMsg}
 					<p class="text-xs text-be-muted-fg">{backfillMsg}</p>
+				{/if}
+
+				<!-- Re-fetch species notes -->
+				<div class="flex items-center justify-between gap-4 border-t border-be-border pt-4">
+					<span>
+						<span class="block text-sm font-medium">Re-fetch all species notes</span>
+						<span class="block text-xs text-be-muted-fg">
+							Look the text up again for <em>every</em> bird, replacing what's cached — use it
+							after a change to how the notes are parsed. Takes about a second per bird and
+							leaves your own notes alone.
+						</span>
+					</span>
+					<button
+						onclick={() => (forceArmed ? runInfoBackfill(true) : (forceArmed = true))}
+						disabled={infoBusy}
+						class="shrink-0 rounded-lg border px-3.5 py-2 text-sm transition-colors disabled:opacity-50 {forceArmed
+							? 'border-be-primary text-be-primary hover:bg-be-primary/10'
+							: 'border-be-border hover:bg-be-secondary'}"
+					>
+						{infoBusy ? 'Fetching…' : forceArmed ? 'Confirm re-fetch' : 'Re-fetch'}
+					</button>
+				</div>
+				{#if infoBusy && infoProgress}
+					{@const p = infoProgress}
+					<div class="mt-1">
+						<div class="mb-1 flex justify-between font-be-mono text-[11px] text-be-muted-fg">
+							<span class="truncate">{p.message}</span>
+							{#if p.total > 0}<span class="shrink-0 tabular-nums">{p.current}/{p.total}</span>{/if}
+						</div>
+						<div class="h-1.5 w-full overflow-hidden rounded-full bg-be-muted">
+							<div
+								class="h-full rounded-full bg-be-primary transition-all duration-300"
+								style="width: {p.total > 0 ? (p.current / p.total) * 100 : 0}%"
+							></div>
+						</div>
+					</div>
 				{/if}
 			</div>
 		{/if}

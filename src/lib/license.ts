@@ -30,3 +30,18 @@ export function licenseHref(url: string | null | undefined): string | null {
 export function xcUrl(xcId: string | null | undefined): string | null {
     return xcId ? `https://xeno-canto.org/${xcId}` : null;
 }
+
+// The reverse of `licenseLabel`: a licence *name* → the deed that defines it.
+// Images carry a stored `image_license_url` from the source, but rows fetched
+// before that column existed only have a name, and the Wikipedia prose licence
+// is a constant we never stored a URL for. Returns null for anything that isn't
+// a plain CC licence (public-domain marks have no deed to link).
+export function ccDeedUrl(name: string | null | undefined): string | null {
+    if (!name) return null;
+    const n = name.trim().toUpperCase().replace(/[\s_]+/g, '-');
+    if (n === 'CC0' || n.startsWith('CC0-')) return 'https://creativecommons.org/publicdomain/zero/1.0/';
+    const m = n.match(/^CC-?(BY(?:-(?:NC|SA|ND))*)(?:-([0-9](?:\.[0-9])?))?$/);
+    if (!m) return null;
+    const version = m[2] ?? '4.0';
+    return `https://creativecommons.org/licenses/${m[1].toLowerCase()}/${version}/`;
+}

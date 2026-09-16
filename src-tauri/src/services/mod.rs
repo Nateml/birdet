@@ -5,3 +5,4 @@ pub mod settings;
 pub mod import;
 pub mod regions;
 pub mod taxonomy;
+pub mod info;

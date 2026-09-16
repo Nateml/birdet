@@ -13,10 +13,11 @@ export type ImportParams = {
     skip_existing: boolean;
     pack_include_skipped: boolean;
     pack_icon: string | null;
+    fetch_info: boolean;
 };
 
 export type ImportProgress = {
-    stage: 'fetching' | 'species' | 'downloading' | 'backfill' | 'done' | 'error';
+    stage: 'fetching' | 'species' | 'downloading' | 'backfill' | 'info' | 'done' | 'error';
     message: string;
     current: number;
     total: number;
@@ -59,6 +60,7 @@ export async function importSpecies(opts: {
     maxPerSpecies?: number;
     packIds?: string[];
     newPackName?: string | null;
+    fetchInfo?: boolean;
 }): Promise<ImportSummary> {
     return await invoke<ImportSummary>('import_species', {
         ebirdCodes: opts.ebirdCodes,
@@ -66,7 +68,8 @@ export async function importSpecies(opts: {
         recType: opts.recType ?? null,
         maxPerSpecies: opts.maxPerSpecies ?? 1,
         packIds: opts.packIds ?? [],
-        newPackName: opts.newPackName ?? null
+        newPackName: opts.newPackName ?? null,
+        fetchInfo: opts.fetchInfo ?? true
     });
 }
 

@@ -26,6 +26,9 @@
 	let maxSpecies = $state(20);
 	let createPack = $state(true);
 	let skipExisting = $state(true);
+	// Species notes are looked up in the background after an import. On by
+	// default; off keeps a big import from competing with itself for bandwidth.
+	let fetchInfo = $state(true);
 	let packIncludeSkipped = $state(false);
 	let packIcon = $state<string | null>(null);
 
@@ -153,7 +156,8 @@
 					create_pack: createPack,
 					skip_existing: skipExisting,
 					pack_include_skipped: skipExisting && packIncludeSkipped,
-					pack_icon: createPack ? packIcon : null
+					pack_icon: createPack ? packIcon : null,
+					fetch_info: fetchInfo
 				})
 			);
 		} catch (e) {
@@ -174,7 +178,8 @@
 					recType: recType || null,
 					maxPerSpecies: Math.max(1, Math.round(maxPerSpecies) || 1),
 					packIds: [...packTargets],
-					newPackName: newPackName.trim() || null
+					newPackName: newPackName.trim() || null,
+					fetchInfo
 				})
 			);
 			selected = [];
@@ -233,7 +238,8 @@
 					recType: recType || null,
 					maxPerSpecies: Math.max(1, Math.round(maxPerSpecies) || 1),
 					packIds: [...packTargets],
-					newPackName: newPackName.trim() || null
+					newPackName: newPackName.trim() || null,
+					fetchInfo
 				})
 			);
 			listPreview = null;
@@ -379,6 +385,18 @@
 				</div>
 			{/if}
 
+			<label class="mt-4 flex items-center gap-2.5 text-sm">
+				<input type="checkbox" bind:checked={fetchInfo} disabled={running} class="accent-be-primary" />
+				<span>
+					Fetch species notes
+					<span class="block text-xs text-be-muted-fg">
+						Look up a description, habitat, behaviour and voice summary per bird in the
+						background. Turn off for a quicker, audio-only import — Settings can fill them
+						in later.
+					</span>
+				</span>
+			</label>
+
 			<button
 				onclick={runRegion}
 				disabled={running || $importJob.active || !region.trim() || !hasKeys}
@@ -464,6 +482,18 @@
 					</select>
 				</label>
 			</div>
+
+			<label class="mt-4 flex items-center gap-2.5 text-sm">
+				<input type="checkbox" bind:checked={fetchInfo} disabled={running} class="accent-be-primary" />
+				<span>
+					Fetch species notes
+					<span class="block text-xs text-be-muted-fg">
+						Look up a description, habitat, behaviour and voice summary per bird in the
+						background. Turn off for a quicker, audio-only import — Settings can fill them
+						in later.
+					</span>
+				</span>
+			</label>
 
 			<div class="mt-5 border-t border-be-border pt-4">
 				<span class="mb-1.5 block text-sm font-medium">Add to packs <span class="text-be-muted-fg">(optional)</span></span>
@@ -605,6 +635,18 @@
 						</select>
 					</label>
 				</div>
+
+				<label class="mt-4 flex items-center gap-2.5 text-sm">
+					<input type="checkbox" bind:checked={fetchInfo} disabled={running} class="accent-be-primary" />
+					<span>
+						Fetch species notes
+						<span class="block text-xs text-be-muted-fg">
+							Look up a description, habitat, behaviour and voice summary per bird in the
+							background. Turn off for a quicker, audio-only import — Settings can fill them
+							in later.
+						</span>
+					</span>
+				</label>
 
 				<div class="mt-5 border-t border-be-border pt-4">
 					<span class="mb-1.5 block text-sm font-medium">Add to packs <span class="text-be-muted-fg">(optional)</span></span>
