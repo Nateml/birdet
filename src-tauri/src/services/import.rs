@@ -401,7 +401,8 @@ pub async fn import_birds(app: &AppHandle, db: &Db, params: ImportParams) -> Res
     }
     species_skipped += skipped_codes.len() as i64; // skipped because already in library
 
-    let pack_id = if params.create_pack && !pack_bird_ids.is_empty() {
+    // Too few birds for a quiz: the import still stands, it just gets no pack.
+    let pack_id = if params.create_pack && pack_bird_ids.len() >= crate::services::packs::MIN_PACK_SPECIES {
         let name = format!(
             "{} · {} species",
             params.family.clone().unwrap_or_else(|| params.region.clone()),
@@ -495,10 +496,16 @@ pub async fn import_species(
         for pid in &pack_ids {
             crate::services::packs::add_birds_to_pack(db, pid, &imported_bird_ids).await?;
         }
-        if let Some(name) = new_pack_name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()) {
-            pack_id = Some(
-                crate::services::packs::create_pack_from_birds(db, &name, &imported_bird_ids).await?,
-            );
+        // A one-species import can't make a usable pack; the birds still land in
+        // the library and in any packs chosen above.
+        if imported_bird_ids.len() >= crate::services::packs::MIN_PACK_SPECIES {
+            if let Some(name) = new_pack_name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
+            {
+                pack_id = Some(
+                    crate::services::packs::create_pack_from_birds(db, &name, &imported_bird_ids)
+                        .await?,
+                );
+            }
         }
         added_to_pack = pack_ids.len() as i64;
     }

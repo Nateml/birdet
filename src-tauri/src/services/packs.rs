@@ -106,9 +106,17 @@ pub async fn get_bird_packs(db: &Db) -> Result<Vec<crate::commands::BirdPackTag>
 }
 
 /// Create a pack containing every recording of the given birds. Returns the id.
+/// Fewest species a pack can hold. A one-bird pack can't produce a multiple
+/// choice question — every option would be the answer — so it's rejected at the
+/// only place packs are made.
+pub const MIN_PACK_SPECIES: usize = 2;
+
 pub async fn create_pack_from_birds(db: &Db, name: &str, bird_ids: &[i64]) -> Result<String> {
-    if bird_ids.is_empty() {
-        return Err(anyhow!("A pack needs at least one bird."));
+    if bird_ids.len() < MIN_PACK_SPECIES {
+        return Err(anyhow!(
+            "A pack needs at least {} birds — there's nothing to choose between otherwise.",
+            MIN_PACK_SPECIES
+        ));
     }
     let id = pack_id_from(name);
     sqlx::query("INSERT INTO packs (id, name) VALUES (?1, ?2)")
@@ -204,8 +212,41 @@ pub async fn delete_pack(db: &Db, pack_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Remove a bird (all its recordings) from a pack.
+/// Remove a bird (all its recordings) from a pack. Refuses to take a pack below
+/// `MIN_PACK_SPECIES`: a one-bird pack can't make a question, and emptying a pack
+/// bird by bird would be a back door around the same rule at creation. Deleting
+/// the pack is the way out.
 pub async fn remove_bird_from_pack(db: &Db, pack_id: &str, bird_id: i64) -> Result<()> {
+    let species: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(DISTINCT r.bird_id)
+           FROM pack_recordings pr
+           JOIN recordings r ON r.id = pr.recording_id
+           WHERE pr.pack_id = ?1"#,
+    )
+    .bind(pack_id)
+    .fetch_one(&db.0)
+    .await?;
+    // Only block when this bird is actually in the pack and would take it under
+    // the floor — removing something that isn't there stays a no-op.
+    if species <= MIN_PACK_SPECIES as i64 {
+        let present: i64 = sqlx::query_scalar(
+            r#"SELECT COUNT(*)
+               FROM pack_recordings pr
+               JOIN recordings r ON r.id = pr.recording_id
+               WHERE pr.pack_id = ?1 AND r.bird_id = ?2"#,
+        )
+        .bind(pack_id)
+        .bind(bird_id)
+        .fetch_one(&db.0)
+        .await?;
+        if present > 0 {
+            return Err(anyhow!(
+                "A pack needs at least {} birds — delete the pack instead.",
+                MIN_PACK_SPECIES
+            ));
+        }
+    }
+
     sqlx::query(
         r#"DELETE FROM pack_recordings
            WHERE pack_id = ?1

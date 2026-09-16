@@ -16,6 +16,10 @@ pub async fn next_question(
     include_reviews: bool,
     cram: bool,
 ) -> Result<Option<Question>> {
+    // The queries below consume `pack`; keep a copy so the options can be scoped
+    // to the same pack the question was drawn from.
+    let pack_for_options = pack.clone();
+
     // Cram / "practice anyway": ignore the schedule entirely and serve any card
     // in the pool, soonest-due first (study-ahead), new birds last. Answers still
     // reschedule normally. The frontend caps the count, so no drain check here.
@@ -37,7 +41,9 @@ pub async fn next_question(
         .fetch_optional(&db.0)
         .await?;
         return match row {
-            Some(r) => Ok(Some(build_question(db, r.get("id"), r.get("common_name"), r.get::<i64, _>("is_new") == 1).await?)),
+            Some(r) => Ok(Some(
+                build_question(db, r.get("id"), r.get("common_name"), r.get::<i64, _>("is_new") == 1, pack_for_options.as_deref()).await?,
+            )),
             None => Ok(None),
         };
     }
@@ -88,7 +94,7 @@ pub async fn next_question(
 
     let prio: i64 = row.get("prio");
     Ok(Some(
-        build_question(db, row.get("id"), row.get("common_name"), prio == 1).await?,
+        build_question(db, row.get("id"), row.get("common_name"), prio == 1, pack_for_options.as_deref()).await?,
     ))
 }
 
@@ -145,9 +151,21 @@ pub async fn queue_counts(
     Ok(QueueCounts { new, learning, due, to_go })
 }
 
-// Pick a random recording for the bird and 3 random distractors, returning a
-// ready-to-serve question (the UI shuffles the options).
-async fn build_question(db: &Db, id: i64, name: String, is_new: bool) -> Result<Question> {
+// Pick a random recording for the bird and up to 3 random distractors, returning
+// a ready-to-serve question (the UI shuffles the options).
+//
+// Distractors come from the same pool the question came from: offering a
+// library-wide wrong answer while studying a pack gives the game away, since a
+// bird the user knows isn't in the pack can't be the answer. A pack smaller than
+// four species therefore yields fewer than four options — better a short list
+// than a rigged one.
+async fn build_question(
+    db: &Db,
+    id: i64,
+    name: String,
+    is_new: bool,
+    pack: Option<&str>,
+) -> Result<Question> {
     // Pull the chosen recording with its attribution (CC credit) in one shot.
     let rec = sqlx::query(
         r#"SELECT id AS id, source AS source, xc_id AS xc_id, recordist AS recordist,
@@ -183,17 +201,27 @@ async fn build_question(db: &Db, id: i64, name: String, is_new: bool) -> Result<
         background.push(crate::commands::BackgroundBird { scientific: sci.clone(), common });
     }
 
-    // Distractors: 3 random other birds, excluding any background species by
-    // both scientific name and resolved common name.
-    let mut sql = String::from("SELECT common_name FROM birds WHERE id != ?");
+    // Distractors: up to 3 random other birds from the same pool, excluding any
+    // background species by both scientific name and resolved common name.
+    let mut sql = String::from("SELECT common_name FROM birds b WHERE b.id != ?");
+    if pack.is_some() {
+        sql.push_str(
+            " AND EXISTS (SELECT 1 FROM pack_recordings pr
+                          JOIN recordings r ON pr.recording_id = r.id
+                          WHERE r.bird_id = b.id AND pr.pack_id = ?)",
+        );
+    }
     for _ in &bg_sci {
-        sql.push_str(" AND scientific_name != ?");
+        sql.push_str(" AND b.scientific_name != ?");
     }
     for _ in &bg_common {
-        sql.push_str(" AND common_name != ?");
+        sql.push_str(" AND b.common_name != ?");
     }
     sql.push_str(" ORDER BY RANDOM() LIMIT 3");
     let mut q = sqlx::query(&sql).bind(id);
+    if let Some(pack) = pack {
+        q = q.bind(pack);
+    }
     for name in &bg_sci {
         q = q.bind(name);
     }

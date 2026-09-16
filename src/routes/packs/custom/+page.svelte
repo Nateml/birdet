@@ -58,8 +58,12 @@
 		selected = next;
 	}
 
+	// Two birds minimum: a one-bird pack can't make a multiple choice question,
+	// and the backend refuses it anyway.
+	const MIN_PACK_BIRDS = 2;
+
 	async function saveManual() {
-		if (!name.trim() || selected.size === 0 || creating) return;
+		if (!name.trim() || selected.size < MIN_PACK_BIRDS || creating) return;
 		creating = true;
 		error = null;
 		try {
@@ -169,10 +173,14 @@
 
 			<button
 				onclick={saveManual}
-				disabled={creating || !name.trim() || selected.size === 0}
+				disabled={creating || !name.trim() || selected.size < MIN_PACK_BIRDS}
 				class="mt-5 w-full rounded-lg bg-be-primary px-5 py-2.5 text-sm font-semibold text-be-primary-fg transition-opacity hover:opacity-90 disabled:opacity-50"
 			>
-				{creating ? 'Creating…' : `Create pack · ${selected.size} birds`}
+				{creating
+					? 'Creating…'
+					: selected.size === 1
+						? 'Pick at least 2 birds'
+						: `Create pack · ${selected.size} birds`}
 			</button>
 		</div>
 	{:else}

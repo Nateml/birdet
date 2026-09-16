@@ -146,6 +146,12 @@
 		}
 	}
 
+	// A pack below two birds can't make a multiple choice question, so the last
+	// two can't be picked off one at a time — delete the pack instead. The
+	// backend enforces this too.
+	const MIN_PACK_BIRDS = 2;
+	const atMinimum = $derived(packBirds.length <= MIN_PACK_BIRDS);
+
 	function toggleAdd(id: number) {
 		const next = new Set(toAdd);
 		if (next.has(id)) next.delete(id);
@@ -287,8 +293,9 @@
 							<p class="truncate text-xs italic text-be-muted-fg">{b.scientific_name}{#if b.family} · {b.family}{/if}</p>
 						</button>
 						<span class="font-be-mono shrink-0 text-xs text-be-muted-fg">{b.recording_count}♪</span>
-						<button onclick={() => remove(b.id)} disabled={busy} title="Remove from pack"
-							class="shrink-0 rounded-md p-1.5 text-be-muted-fg transition-colors hover:bg-be-destructive/10 hover:text-be-destructive">
+						<button onclick={() => remove(b.id)} disabled={busy || atMinimum}
+							title={atMinimum ? `A pack needs at least ${MIN_PACK_BIRDS} birds — delete the pack instead` : 'Remove from pack'}
+							class="shrink-0 rounded-md p-1.5 text-be-muted-fg transition-colors hover:bg-be-destructive/10 hover:text-be-destructive disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-be-muted-fg">
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
 						</button>
 					</div>
